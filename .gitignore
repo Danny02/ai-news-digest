@@ -16,3 +16,7 @@ node_modules/
 .pi/
 .impeccable/
 .DS_Store
+
+# Pipeline working copies (generated output, not source)
+drafts/
+runs/
