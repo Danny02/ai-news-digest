@@ -3,6 +3,10 @@
 A daily digest of AI news from X: fetch, curate, summarise, then email it to
 subscribers and keep a weekly archive on the web.
 
+**[View the live site](https://ai-news.nullzwo.dev)** &middot; **[Source on GitHub](https://github.com/Danny02/ai-news-digest)**
+
+![AI News Digest landing page](screenshot.png)
+
 ## How it works
 
 1. **Fetch** — `scripts/phase1_discovery.py` pulls recent posts from a curated
