@@ -191,7 +191,7 @@ async function handleConfirm(request, env, url) {
     receipt: escapeHtml(email),
     chip: "PASS",
     spec: [
-      "<b>06:00 UTC</b>, every day. One email, nothing else.",
+      "<b>Daily</b>, one email. Nothing else.",
       "<b>~500 words</b>, five themes, under a minute to scan.",
       "<b>One click</b> in any issue takes you off the list.",
     ],

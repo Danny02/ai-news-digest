@@ -26,7 +26,7 @@ function shell(main, title, status = 200, extraScript = "", bodyClass = "") {
       `<div class="stream" aria-hidden="true"><div class="streamIn"><div class="track" id="track"></div></div></div>` +
       `<div class="crt" aria-hidden="true"></div>` +
       `<div class="bar"><a class="mark" href="/"><b>AI News Digest</b></a>` +
-      `<span><a href="/archive">Archive</a> &middot; Daily 06:00 UTC</span></div>` +
+      `<span><a href="/archive">Archive</a> &middot; Sent daily</span></div>` +
       `<main>${main}</main>` +
       `<footer><span>digest@nullzwo.dev</span><span>No sponsors</span>` +
       `<span>No tracking pixels</span><button id="inv" type="button">Invert</button></footer>` +
