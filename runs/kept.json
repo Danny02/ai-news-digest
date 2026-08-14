@@ -1,0 +1,128 @@
+[
+  {
+    "id": "2087887408440164663",
+    "topic": "harness-engineering",
+    "keep_because": "DeepSeek Harness v0.1 open-sourced (MIT) - a modular agent harness the reader could run or inspect",
+    "url": "https://x.com/deepseek_ai/status/2087887408440164663"
+  },
+  {
+    "id": "2087917006448173519",
+    "topic": "harness-engineering",
+    "keep_because": "DeepSeek Harness: 24K stars, React web app, everything is a plugin - high modularity is the differentiator",
+    "url": "https://x.com/Hesamation/status/2087917006448173519"
+  },
+  {
+    "id": "2087949211564183730",
+    "topic": "model-releases",
+    "keep_because": "Gemini 3.7 Flash: Google's most intelligent workhorse for coding and agents, 3 weeks after 3.6 Flash - a model to test",
+    "url": "https://x.com/GoogleAIStudio/status/2087949211564183730"
+  },
+  {
+    "id": "2087975627391717461",
+    "topic": "model-releases",
+    "keep_because": "Benchmark context: Gemini 3.7 Flash +4 points over 3.6, on the Intelligence vs Time Pareto frontier - third Flash in 3 months",
+    "url": "https://x.com/ArtificialAnlys/status/2087975627391717461"
+  },
+  {
+    "id": "2087964264275587565",
+    "topic": "model-releases",
+    "keep_because": "Pricing caveat: 3.7 Flash 'introductory' price doubles Dec 31 - planning signal for anyone adopting it",
+    "url": "https://x.com/simonw/status/2087964264275587565"
+  },
+  {
+    "id": "2087942296721559607",
+    "topic": "harness-engineering",
+    "keep_because": "A full day of real work on Grok 4.6 as the orchestrator agent - an honest experience report with setup detail",
+    "url": "https://x.com/kunchenguid/status/2087942296721559607"
+  },
+  {
+    "id": "2087988038924464143",
+    "topic": "model-releases",
+    "keep_because": "Grok 4.6 field report from a heavy user - where the model genuinely stands",
+    "url": "https://x.com/theo/status/2087988038924464143"
+  },
+  {
+    "id": "2087879340457660721",
+    "topic": "context-window-degradation",
+    "keep_because": "Pi's own engineer on compaction: how the context window affects output quality and how Pi implements it - directly relevant to the reader's tool",
+    "url": "https://x.com/pidotdev/status/2087879340457660721"
+  },
+  {
+    "id": "2087296435209298371",
+    "topic": "opus-5-regression",
+    "keep_because": "Cross-source signal: Opus 5 tops benchmarks yet feels worst in use - convergent experience report",
+    "url": "https://x.com/0xIlyy/status/2087296435209298371"
+  },
+  {
+    "id": "2087539867135922669",
+    "topic": "opus-5-regression",
+    "keep_because": "Convergent: Opus 5 slop, Sonnet 5 worse - both releases disappointing",
+    "url": "https://x.com/EXM7777/status/2087539867135922669"
+  },
+  {
+    "id": "2087828779406364703",
+    "topic": "opus-5-regression",
+    "keep_because": "Opus 5 overengineers then charges you to clean up the slop - the token-cost angle on the regression",
+    "url": "https://x.com/RylanSchaeffer/status/2087828779406364703"
+  },
+  {
+    "id": "2087870747339293076",
+    "topic": "opus-5-regression",
+    "keep_because": "Another independent comparison: Opus 5 less smart, slower, more expensive than 5.6 Sol - convergence",
+    "url": "https://x.com/NorthstarBrain/status/2087870747339293076"
+  },
+  {
+    "id": "2087947117411099073",
+    "topic": "opus-5-regression",
+    "keep_because": "Actionable counterpoint: a concrete fix for Opus 5 (drift/slowness/laziness), applicable to 5.6 Sol too",
+    "url": "https://x.com/bil0090/status/2087947117411099073"
+  },
+  {
+    "id": "2087563797632278592",
+    "topic": "harness-engineering",
+    "keep_because": "Uncle Bob: wrangling capricious agents into a productive harness is the decade's software-engineering challenge",
+    "url": "https://x.com/unclebobmartin/status/2087563797632278592"
+  },
+  {
+    "id": "2087538649864818991",
+    "topic": "harness-engineering",
+    "keep_because": "Anthropic engineers: half your harness fixes problems the model stopped having - a pruning principle for own setups",
+    "url": "https://x.com/0xDepressionn/status/2087538649864818991"
+  },
+  {
+    "id": "2086501951387422991",
+    "topic": "harness-engineering",
+    "keep_because": "The core argument: harness and context engineering beat prompt engineering",
+    "url": "https://x.com/divaagurlxw/status/2086501951387422991"
+  },
+  {
+    "id": "2086755005919637577",
+    "topic": "context-window-degradation",
+    "keep_because": "A flawless demo that hallucinated a path and burned $140 in a runaway loop 48h later - prompts were fine, harness was not",
+    "url": "https://x.com/zebratechieszts/status/2086755005919637577"
+  },
+  {
+    "id": "2086106625094434875",
+    "topic": "agent-skills-ecosystem",
+    "keep_because": "'File over agent': a free Obsidian skill with 45 commands, 1,374 forks in 7 weeks - the note-taking skill the reader could adopt",
+    "url": "https://x.com/seeconvm/status/2086106625094434875"
+  },
+  {
+    "id": "2085523820245553412",
+    "topic": "agent-skills-ecosystem",
+    "keep_because": "Skill that lets Claude Code watch and analyze any video (UGC ads, screen recordings) - installable for the reader",
+    "url": "https://x.com/mikefutia/status/2085523820245553412"
+  },
+  {
+    "id": "2086953668939780275",
+    "topic": "harness-engineering",
+    "keep_because": "OpenAI engineer put Codex inside Claude Code as a plugin, then inside Doom - the harness is the product, not the model",
+    "url": "https://x.com/vartekxx/status/2086953668939780275"
+  },
+  {
+    "id": "2085491188350496807",
+    "topic": "qwen-3.8-open-weights",
+    "keep_because": "A concrete local stack: GLM 5.2 and DeepSeek V4 Flash on DGX Sparks, Qwen 3.8 on a 98GB Mac Studio - what the reader could actually run",
+    "url": "https://x.com/JASONMCNAB/status/2085491188350496807"
+  }
+]

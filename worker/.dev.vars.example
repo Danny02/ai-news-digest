@@ -1,0 +1,4 @@
+# Copy to .dev.vars and fill in real values. Never commit .dev.vars.
+RESEND_API_KEY=
+RESEND_SEGMENT_ID=
+SENDER=AI News Digest <digest@nullzwo.dev>

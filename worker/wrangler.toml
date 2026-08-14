@@ -1,0 +1,35 @@
+name = "ai-news-digest"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Custom domain — re-attached on every deploy. Requires the nullzwo.dev zone
+# to be active in the same Cloudflare account.
+routes = [
+  { pattern = "ai-news.nullzwo.dev", custom_domain = true }
+]
+
+# Pending double-opt-in tokens, stored in both directions so the subscribe
+# dedupe is a single read: tok:<token> -> email and pend:<email> -> token.
+# Production KV namespace:
+# wrangler kv namespace create DIGEST_PENDING  -> bind the id here.
+[[kv_namespaces]]
+binding = "DIGEST_PENDING"
+id = "f6ff28de58f14bbe86cac759b83722cc"
+
+# Local dev namespace: create with `wrangler kv namespace create --preview DIGEST_PENDING`
+# and put its preview_id here. For `wrangler dev` to work you must set this.
+#    preview_id = "REPLACE_WITH_PREVIEW_KV_ID"
+
+# Published issues (issue:<YYYY-MM-DD>), weekly indexes (week:<GGGG-Www>) and
+# meta:first_week. Values are the structured JSON from /send. No TTL: this is
+# the permanent archive behind /archive. Send is the only writer, so there is
+# no archive token.
+#   wrangler kv namespace create DIGEST_ARCHIVE   -> paste the id below
+[[kv_namespaces]]
+binding = "DIGEST_ARCHIVE"
+id = "f79e194f06fa4047bb18c0ea8aed207c"
+
+# Worker secrets (wrangler secret put):
+#   RESEND_API_KEY  - Resend sending key
+#   RESEND_SEGMENT_ID - Resend segment (mailing list) to add subscribers to
+#   SEND_TOKEN      - bearer token required by POST /send (daily digest).

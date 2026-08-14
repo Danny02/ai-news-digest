@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<meta name="supported-color-schemes" content="dark" />
+<!--
+  CONTRACT — signal/noise (monochrome)
+  THESIS: the digest is what survived a filter, so the artifact is black and
+  white and nothing else. Grey is the noise, white is the signal; that one
+  contrast carries every level of hierarchy. No accent colour, no glass, no
+  glow, no rounded corners.
+  OWN-WORLD: pure black canvas, system sans for statement type, mono for
+  labels, dates and code. Hairlines separate themes. Every item line is led by
+  a 2px white bar — the same "passed the filter" mark used on the web page.
+  STORY: reader opens it, reads a grey line and a white line, scans five
+  hairline-separated themes, leaves with one fix worth taking.
+  FIRST VIEWPORT: wordmark top-left, date top-right in mono, a two-line
+  statement (grey "Most AI news is noise." / white "Here is the rest."), then
+  the first theme.
+  CONSTRAINTS: table-based, inline styles, no webfonts, no background images,
+  no CSS that Outlook or Gmail must understand to stay readable.
+  TOKENS: {{ DATE }} and {{ BODY }} — substituted by scripts/render_email.py
+  and scripts/send_digest.py. Do not rename.
+-->
+<title>AI News Digest</title>
+</head>
+<body style="margin:0; padding:0; background-color:#000000; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; color:#b8b8b8; -webkit-font-smoothing:antialiased;">
+<div style="display:none; max-height:0; overflow:hidden; mso-hide:all;">
+  Most AI news is noise. Here is the rest — what changed, and the fix worth taking.
+</div>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#000000;">
+  <tr>
+    <td align="center" style="padding:36px 14px 56px 14px;">
+
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px; width:100%;">
+
+        <!-- HEADER -->
+        <tr>
+          <td style="padding:0 6px 8px 6px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td align="left" style="vertical-align:middle;">
+                  <span style="font-size:11px; font-weight:700; letter-spacing:0.2em; text-transform:uppercase; color:#ffffff;">AI&nbsp;News&nbsp;Digest</span>
+                </td>
+                <td align="right" style="vertical-align:middle;">
+                  <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; letter-spacing:0.1em; color:#7a7a7a;">{{ DATE }}</span>
+                </td>
+              </tr>
+              <tr>
+                <td colspan="2" style="padding-top:30px;">
+                  <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:34px; line-height:1.02; font-weight:800; letter-spacing:-0.04em; color:#7a7a7a;">
+                    Most AI news is noise.<br/>
+                    <span style="color:#ffffff;">Here is the rest.</span>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td colspan="2" style="padding-top:18px; padding-bottom:4px;">
+                  <div style="font-size:14px; line-height:21px; color:#7a7a7a; padding-right:24px;">
+                    From public X posts, held to one bar: could this change how you work?
+                  </div>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- BODY -->
+        {{ BODY }}
+
+        <!-- CLOSE -->
+        <tr>
+          <td style="padding:30px 6px 0 6px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td>
+                  <div style="border-top:1px solid #1e1e1e; padding-top:18px;">
+                    <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:11px; line-height:18px; color:#5a5a61; letter-spacing:0.12em; text-transform:uppercase;">AI&nbsp;News&nbsp;Digest &middot; No sponsors &middot; No tracking pixels</span>
+                  </div>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+      </table>
+
+    </td>
+  </tr>
+</table>
+
+</body>
+</html>
