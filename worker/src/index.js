@@ -15,7 +15,7 @@
  *   KV      DIGEST_PENDING   tok:<token> -> email, pend:<email> -> token (TTL'd)
  *   KV      DIGEST_ARCHIVE   issue:<date>, week:<weekKey>, meta:first_week
  *   secret  RESEND_API_KEY, RESEND_SEGMENT_ID, SEND_TOKEN
- *   var     SENDER (optional)
+ *   var     SENDER, GC_SITE, SITE_DOMAIN (optional)
  *
  * No KV `list()` is used anywhere: every lookup is a direct key read. See
  * `pendingKeys` and the week index for why.
@@ -129,7 +129,7 @@ async function isAlreadySubscribed(env, email) {
   return Boolean(data && data.unsubscribed === false);
 }
 
-async function handleConfirm(request, env, url) {
+async function handleConfirm(request, env, url, site) {
   const token = url.searchParams.get("token") || "";
   if (!token) {
     return statusPage({
@@ -142,6 +142,7 @@ async function handleConfirm(request, env, url) {
       ],
       action: { href: "/", label: "Start again" },
       title: "Confirm",
+      site,
     });
   }
 
@@ -157,6 +158,7 @@ async function handleConfirm(request, env, url) {
       ],
       action: { href: "/", label: "Subscribe again" },
       title: "Confirm",
+      site,
     });
   }
 
@@ -175,6 +177,7 @@ async function handleConfirm(request, env, url) {
       action: { href: "/", label: "Back to start" },
       title: "Confirm",
       status: 500,
+      site,
     });
   }
 
@@ -196,6 +199,7 @@ async function handleConfirm(request, env, url) {
       "<b>One click</b> in any issue takes you off the list.",
     ],
     title: "Confirmed",
+    site,
   });
 }
 
@@ -368,7 +372,10 @@ async function registerContact(env, email) {
 }
 
 async function sendConfirmEmail(env, request, email, token) {
-  const link = `${new URL(request.url).origin}/confirm?token=${encodeURIComponent(token)}`;
+  const origin = env.SITE_DOMAIN ? `https://${env.SITE_DOMAIN}` : new URL(request.url).origin;
+  const link = `${origin}/confirm?token=${encodeURIComponent(token)}`;
+  const fromIdent = env.SENDER || "AI News Digest <digest@nullzwo.dev>";
+  const fromAddr = (fromIdent.match(/<([^<>]+)>/) || [])[1] || fromIdent;
   const sans = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
   const mono = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
   const htmlBody = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#000000;margin:0;padding:0">
@@ -384,7 +391,7 @@ async function sendConfirmEmail(env, request, email, token) {
 </td></tr>
 <tr><td style="font-family:${mono};font-size:12px;line-height:1.6;color:#7a7a7a;padding-top:28px">Or paste this into your browser:<br><a href="${link}" style="color:#b8b8b8;word-break:break-all">${link}</a></td></tr>
 <tr><td style="border-top:1px solid #1e1e1e;padding-top:20px;margin-top:10px"></td></tr>
-<tr><td style="font-family:${mono};font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#5a5a61">Link valid 7 days &middot; digest@nullzwo.dev</td></tr>
+<tr><td style="font-family:${mono};font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#5a5a61">Link valid 7 days &middot; ${fromAddr}</td></tr>
 </table></td></tr></table>`;
   const textBody = [
     "AI News Digest",
@@ -403,7 +410,7 @@ async function sendConfirmEmail(env, request, email, token) {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      from: env.SENDER || "AI News Digest <digest@nullzwo.dev>",
+      from: fromIdent,
       to: [email],
       subject: "Confirm your AI News Digest subscription",
       html: htmlBody,
@@ -426,13 +433,13 @@ async function sendConfirmEmail(env, request, email, token) {
 // week is cached for a day, the current week for a minute. Week-to-week
 // navigation is arithmetic, so no page needs to know what else exists.
 
-async function handleArchiveWeek(env, weekKey) {
+async function handleArchiveWeek(env, weekKey, site) {
   const [doc, firstWeek] = await Promise.all([
     readJson(env.DIGEST_ARCHIVE, WEEK + weekKey),
     env.DIGEST_ARCHIVE.get(FIRST_WEEK),
   ]);
   const thisWeek = weekKeyOf(todayUTC());
-  if (weekKey > thisWeek) return notFound();
+  if (weekKey > thisWeek) return notFound(site);
 
   const prev = shiftWeek(weekKey, -1);
   const next = shiftWeek(weekKey, 1);
@@ -441,14 +448,15 @@ async function handleArchiveWeek(env, weekKey) {
     issues: (doc && doc.issues) || [],
     prevWeek: firstWeek && prev >= firstWeek ? prev : null,
     nextWeek: next <= thisWeek ? next : null,
+    site,
   });
   return withCache(res, weekKey === thisWeek ? CACHE_FRESH : CACHE_SETTLED);
 }
 
-async function handleArchiveIssue(env, date) {
+async function handleArchiveIssue(env, date, site) {
   const doc = await readJson(env.DIGEST_ARCHIVE, ISSUE + date);
   // `status: "sending"` is a reservation, not a published issue.
-  if (!doc || !Array.isArray(doc.sections) || !doc.sections.length) return notFound();
+  if (!doc || !Array.isArray(doc.sections) || !doc.sections.length) return notFound(site);
 
   const weekKey = weekKeyOf(date);
   const week = await readJson(env.DIGEST_ARCHIVE, WEEK + weekKey);
@@ -461,6 +469,7 @@ async function handleArchiveIssue(env, date) {
     weekKey,
     prev: at >= 0 && at < dates.length - 1 ? dates[at + 1] : null,
     next: at > 0 ? dates[at - 1] : null,
+    site,
   });
   return withCache(res, date === todayUTC() ? CACHE_FRESH : CACHE_SETTLED);
 }
@@ -492,6 +501,11 @@ async function cached(request, ctx, render) {
 
 let bgBytes = null;
 
+/**
+ * /bg.jpg, served for non-Pages runtimes. On Cloudflare Pages the router's
+ * ASSETS-first pass serves the static bg.jpg from the output dir and this is
+ * the fallback for `wrangler dev` and the offline tests.
+ */
 function backgroundImage() {
   if (!bgBytes) {
     const bin = atob(BG_JPEG_B64);
@@ -513,15 +527,35 @@ function randomToken() {
 
 // --- router ------------------------------------------------------------
 
+/** The page-shell config derived from non-secret vars. Threaded into ui.js. */
+function thisSite(env, path = "") {
+  return {
+    gcSite: env.GC_SITE,
+    domain: env.SITE_DOMAIN,
+    path,
+    sender: env.SENDER,
+  };
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const { pathname } = url;
     const isGet = request.method === "GET";
+    const site = thisSite(env, pathname);
 
-    if (isGet && (pathname === "/" || pathname === "")) return landingPage();
+    // Cloudflare Pages: serve static files (bg.jpg, favicon.svg, robots.txt)
+    // from the output dir first; when the path is not a static file, ASSETS
+    // returns 404 and we fall through to the routes below. `wrangler dev` and
+    // the offline tests have no ASSETS, so `env.ASSETS` stays undefined there.
+    if (isGet && env.ASSETS) {
+      const hit = await env.ASSETS.fetch(request);
+      if (hit.status !== 404) return hit;
+    }
+
+    if (isGet && (pathname === "/" || pathname === "")) return landingPage(site);
     if (isGet && pathname === "/bg.jpg") return backgroundImage();
-    if (isGet && pathname === "/confirm") return handleConfirm(request, env, url);
+    if (isGet && pathname === "/confirm") return handleConfirm(request, env, url, site);
 
     if (request.method === "POST" && pathname === "/subscribe") {
       try {
@@ -558,14 +592,14 @@ export default {
       try {
         slug = decodeURIComponent(pathname.slice("/archive/".length));
       } catch {
-        return notFound();
+        return notFound(site);
       }
-      if (isValidWeekKey(slug)) return cached(request, ctx, () => handleArchiveWeek(env, slug));
+      if (isValidWeekKey(slug)) return cached(request, ctx, () => handleArchiveWeek(env, slug, site));
       if (DATE_RE.test(slug) && isValidDate(slug)) {
-        return cached(request, ctx, () => handleArchiveIssue(env, slug));
+        return cached(request, ctx, () => handleArchiveIssue(env, slug, site));
       }
     }
 
-    return notFound();
+    return notFound(site);
   },
 };

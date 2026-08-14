@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# The archive is crawlable; per-issue links are normal paths.
+Sitemap: https://ai-news.nullzwo.dev/

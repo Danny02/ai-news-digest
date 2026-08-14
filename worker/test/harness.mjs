@@ -171,6 +171,8 @@ export function makeEnv(overrides = {}) {
     RESEND_SEGMENT_ID: SEGMENT_ID,
     SEND_TOKEN,
     SENDER: "Test <digest@nullzwo.dev>",
+    GC_SITE: "ai-news",
+    SITE_DOMAIN: "ai-news.nullzwo.dev",
     ...overrides,
   };
 }

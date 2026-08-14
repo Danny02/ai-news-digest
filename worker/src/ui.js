@@ -9,15 +9,43 @@
 import { escapeHtml, renderInline, WEB } from "./md.js";
 import { weekLabel } from "./week.js";
 
-function shell(main, title, status = 200, extraScript = "", bodyClass = "") {
-  const gc =
-    `<script data-goatcounter="https://ai-news.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>`;
+// Public footer link to the source. Not a secret.
+const GITHUB_REPO = "https://github.com/Danny02/ai-news-digest";
+// GitHub octocat mark (simple-icons, CC0), inlined so no external asset loads.
+const GITHUB_MARK =
+  `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12Z" /></svg>`;
+
+/** The mailbox part of a Sender header like "Name <a@b.c>", or the raw string. */
+function siteAddr(sender) {
+  if (typeof sender !== "string") return "";
+  const m = sender.match(/<([^<>]+)>/);
+  return m ? m[1] : sender;
+}
+
+/**
+ * Site-level config that varies by deployment. `site` is threaded in by the
+ * router from env so pages never touch a secret:
+ *  - gcSite:  GoatCounter site code ("ai-news")  -> the count script URL
+ *  - domain:  SITE_DOMAIN ("ai-news.nullzwo.dev")
+ *  - path:    current pathname, for the canonical URL
+ *  - sender:  SENDER, used for the footer contact address
+ */
+function shell(main, title, status = 200, extraScript = "", bodyClass = "", site = {}) {
+  const gc = site.gcSite
+    ? `<script data-goatcounter="https://${site.gcSite}.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>`
+    : "";
+  const canon = site.domain
+    ? `<link rel="canonical" href="https://${site.domain}${site.path || ""}">`
+    : "";
+  const addr = siteAddr(site.sender) || "digest@nullzwo.dev";
   return new Response(
     `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
       `<meta name="viewport" content="width=device-width,initial-scale=1">` +
       `<meta name="color-scheme" content="dark light">` +
-      `<title>${title}</title><style>${css()}</style>` +
-      `${gc}` + `</head><body${bodyClass ? ` class="${bodyClass}"` : ""}>` +
+      `<title>${title}</title>` +
+      `<link rel="icon" href="/favicon.svg" type="image/svg+xml">` +
+      `<style>${css()}</style>` +
+      `${canon}${gc}` + `</head><body${bodyClass ? ` class="${bodyClass}"` : ""}>` +
       `<div class="plate" aria-hidden="true"></div>` +
       `<div class="grain" aria-hidden="true"></div>` +
       `<div class="gl gl1" aria-hidden="true"></div>` +
@@ -28,8 +56,10 @@ function shell(main, title, status = 200, extraScript = "", bodyClass = "") {
       `<div class="bar"><a class="mark" href="/"><b>AI News Digest</b></a>` +
       `<span><a href="/archive">Archive</a> &middot; Sent daily</span></div>` +
       `<main>${main}</main>` +
-      `<footer><span>digest@nullzwo.dev</span><span>No sponsors</span>` +
-      `<span>No tracking pixels</span><button id="inv" type="button">Invert</button></footer>` +
+      `<footer><span>${addr}</span><span>No sponsors</span>` +
+      `<span>No tracking pixels</span>` +
+      `<a class="gh" href="${GITHUB_REPO}" target="_blank" rel="noopener" aria-label="Source on GitHub">${GITHUB_MARK}</a>` +
+      `<button id="inv" type="button">Invert</button></footer>` +
       `<script>${baseScript()}${extraScript}</script>` +
       `</body></html>`,
     { status, headers: { "content-type": "text/html; charset=utf-8" } }
@@ -272,7 +302,7 @@ function baseScript() {
   );
 }
 
-export function landingPage() {
+export function landingPage(site = {}) {
   const main = `<div class="hero">
 <h1><span class="a">Most AI news is noise.</span><span class="b">We send the rest.</span></h1>
 <p class="lead">One email a day on coding agents, open weights and harness engineering &mdash; held to one bar: <b>could this change how you work?</b></p>
@@ -294,11 +324,11 @@ export function landingPage() {
     `if(\!x.ok){m.className='msg err';m.textContent=x.d.error||'Something went wrong.';return}` +
     `m.className='msg ok';m.textContent='Confirmation link sent. Check your inbox.';f.email.value=''` +
     `}).catch(function(){m.className='msg err';m.textContent='Network error. Try again.'})});`;
-  return shell(main, "AI News Digest", 200, script);
+  return shell(main, "AI News Digest", 200, script, "", site);
 }
 
 // One layout for every terminal state: confirmed, expired, failed, 404.
-export function statusPage({ kicker, a, b, receipt, chip, spec, action, title, status = 200 }) {
+export function statusPage({ kicker, a, b, receipt, chip, spec, action, title, status = 200, site = {} }) {
   const main = `<div class="hero">
 <span class="kicker">${kicker}</span>
 <h1><span class="a">${a}</span><span class="b">${b}</span></h1>
@@ -306,10 +336,10 @@ ${receipt ? `<div class="receipt"><span>${receipt}</span>${chip ? `<em class="ch
 ${spec ? `<div class="spec">${spec.map((l) => `<p>${l}</p>`).join("")}</div>` : ""}
 ${action ? `<a class="action" href="${action.href}">${action.label}</a>` : ""}
 </div>`;
-  return shell(main, title, status);
+  return shell(main, title, status, "", "", site);
 }
 
-export function notFound() {
+export function notFound(site = {}) {
   return statusPage({
     kicker: "404",
     a: "Nothing here.",
@@ -318,6 +348,7 @@ export function notFound() {
     action: { href: "/", label: "Go to the start" },
     title: "Not found",
     status: 404,
+    site,
   });
 }
 
@@ -325,7 +356,7 @@ export function notFound() {
  * One week of issues. `prevWeek`/`nextWeek` are week keys or null; the caller
  * computes them arithmetically, so rendering never needs to know what exists.
  */
-export function archiveWeekPage({ weekKey, issues, prevWeek, nextWeek }) {
+export function archiveWeekPage({ weekKey, issues, prevWeek, nextWeek, site = {} }) {
   const rows = issues.length
     ? issues
         .map(
@@ -352,11 +383,11 @@ export function archiveWeekPage({ weekKey, issues, prevWeek, nextWeek }) {
 ${nav}
 <a class="action" href="/">Subscribe</a>
 </div>`;
-  return shell(main, `${weekLabel(weekKey)} — AI News Digest`, 200, "", "doc");
+  return shell(main, `${weekLabel(weekKey)} — AI News Digest`, 200, "", "doc", site);
 }
 
 /** A single issue. `prev`/`next` are dates within the same week, or null. */
-export function archiveIssuePage({ date, sections, weekKey, prev, next }) {
+export function archiveIssuePage({ date, sections, weekKey, prev, next, site = {} }) {
   const body = sections
     .map(
       (s) =>
@@ -381,5 +412,5 @@ export function archiveIssuePage({ date, sections, weekKey, prev, next }) {
 ${nav}
 <a class="action" href="/">Get tomorrow&rsquo;s issue</a>
 </div>`;
-  return shell(main, `${date} — AI News Digest`, 200, "", "doc");
+  return shell(main, `${date} — AI News Digest`, 200, "", "doc", site);
 }
