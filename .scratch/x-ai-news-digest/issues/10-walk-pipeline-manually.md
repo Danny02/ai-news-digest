@@ -52,8 +52,7 @@ validated pipeline plus the list of adjustments made along the way.
   borders; renderer `scripts/render_email.py`; send `scripts/send_digest.py`
   via Resend from `digest@nullzwo.dev`. Live HTML send approved by the
   reader. Sender domain `nullzwo.dev` is verified (not `senacor.com`).
-  Recipient for live tests: `dannynullzwo@gmail.com`; production:
-  `daniel.heinrich@senacor.com`.
+  Recipients are managed by the worker (Resend segment); no per-address list.
 
 ## Answer
 
