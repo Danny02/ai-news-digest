@@ -5,10 +5,11 @@
 #   1. fetch (discovery + follow-up + merge)  -> runs/*.json
 #   2. AGENT (judgment in the loop prompt): topic selection, filter, summary
 #      per skills/ai-news-digest/SKILL.md and prompts/*.md
-#   3. render + send the newest draft to BOTH recipients
+#   3. broadcast the newest draft to the subscriber segment via the worker
+#      (scripts/send_via_api.py -> POST /send)
 #
-# Env needed: DESEARCH_API_KEY, RESEND_API_KEY, SENDER (optional).
-# Recipients: RECIPIENTS env (comma-sep) OR defaults (senacor + gmail).
+# Env needed: DESEARCH_API_KEY, RESEND_API_KEY, SEND_TOKEN, SENDER (optional).
+# No per-address recipient list: the worker owns the audience.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
