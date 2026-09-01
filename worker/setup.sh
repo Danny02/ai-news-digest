@@ -191,13 +191,17 @@ TOTAL_STAGES=6
 
 banner "AI News Digest worker setup"
 
+# Pages project (wrangler.toml: pages_build_output_dir = "static"). Secrets
+# go via `wrangler pages secret put` — Workers-style `wrangler secret put`
+# targets a different secret store and silently breaks POST /send (401).
+PAGES_PROJECT="${PAGES_PROJECT:-ai-news-digest}"
 put_worker_secret() {
   local name="$1" value="$2"
-  if printf '%s' "$value" | npx wrangler secret put "$name" >/dev/null 2>&1; then
+  if printf '%s' "$value" | npx wrangler pages secret put "$name" --project-name "$PAGES_PROJECT" >/dev/null 2>&1; then
     WRITTEN_SECRET+=("$name")
-    printf '  %s✓ set%s Worker secret %s\n' "$GREEN" "$RESET" "$name"
+    printf '  %s✓ set%s Pages secret %s\n' "$GREEN" "$RESET" "$name"
   else
-    SKIPPED+=("Worker secret $name (set it later: printf '...' | npx wrangler secret put $name)")
+    SKIPPED+=("Pages secret $name (set it later: printf '...' | npx wrangler pages secret put $name --project-name $PAGES_PROJECT)")
     warn "skipped Worker secret $name — wrangler not ready; set it later"
   fi
 }

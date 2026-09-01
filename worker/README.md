@@ -9,7 +9,7 @@ cd worker
 
 It walks you through: Resend domain, Resend API key, Resend segment, SENDER,
 deploy, and the `ai-news.nullzwo.dev` custom domain. It writes local values to
-`.dev.vars` and sets worker secrets via `wrangler secret put`.
+`.dev.vars` and sets project secrets via `wrangler pages secret put`.
 
 ---
 
@@ -105,17 +105,17 @@ wrangler kv namespace create --preview DIGEST_PENDING
 ```
 Paste that `preview_id` into `wrangler.toml`.
 
-### 2. Secrets
+### 2. Secrets (Pages project — run from the worker dir)
 ```bash
-wrangler secret put RESEND_API_KEY        # Resend sending key
-wrangler secret put RESEND_SEGMENT_ID     # Resend list/segment ID (from Resend dashboard)
-wrangler secret put SEND_TOKEN            # bearer token required by POST /send
+wrangler pages secret put RESEND_API_KEY --project-name ai-news-digest        # Resend sending key
+wrangler pages secret put RESEND_SEGMENT_ID --project-name ai-news-digest     # Resend list/segment ID (from Resend dashboard)
+wrangler pages secret put SEND_TOKEN --project-name ai-news-digest            # bearer token required by POST /send
 ```
 
-Also set `SENDER` (optional, defaults to `AI News Digest <digest@nullzwo.dev>`):
-```bash
-wrangler secret put SENDER
-```
+SENDER is NOT a secret — it's a non-secret `[vars]` entry in `wrangler.toml`
+(deployed with the config; fallback `AI News Digest <digest@nullzwo.dev>` in
+code). Do not set it as a secret — a Pages secret of the same name would
+shadow the var.
 
 ### 3. Custom domain
 `ai-news.nullzwo.dev` is declarative in `wrangler.toml` (`routes` with

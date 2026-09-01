@@ -196,10 +196,26 @@ finish() {
 # STAGES — author this section. One stage() per step the human takes.
 # ──────────────────────────────────────────────────────────────────────────
 
-# The loop reads secrets from the repo-root .env; the worker secret lives in
+# The loop reads secrets from the repo-root .env; the project secret lives in
 # Cloudflare. This wizard wires the SEND_TOKEN to both places.
 cd "$(dirname "$0")/.."          # repo root
 ENV_FILE=".env"                  # the loop's secret file
+
+# Pages project (wrangler.toml: pages_build_output_dir = "static"). Secrets
+# go via `wrangler pages secret put` — Workers-style `wrangler secret put`
+# targets a different secret store and silently breaks POST /send (401).
+# Override the library's put_worker_secret here in the author section.
+PAGES_PROJECT="${PAGES_PROJECT:-ai-news-digest}"
+put_worker_secret() {
+  local name="$1" value="$2"
+  if printf '%s' "$value" | npx wrangler pages secret put "$name" --project-name "$PAGES_PROJECT" >/dev/null 2>&1; then
+    WRITTEN_SECRET+=("$name")
+    printf '  %s✓ set%s Pages secret %s\n' "$GREEN" "$RESET" "$name"
+  else
+    SKIPPED+=("Pages secret $name (set it later: printf '...' | npx wrangler pages secret put $name --project-name $PAGES_PROJECT)")
+    warn "skipped Pages secret $name — wrangler not ready; set it later"
+  fi
+}
 
 TOTAL_STAGES=2
 
@@ -209,11 +225,11 @@ banner "AI News Digest — send token setup"
 stage "Generate SEND_TOKEN"
 say "The daily loop calls POST /send with this token; the worker requires it."
 step "A random token is generated now and shown once — copy it into your"
-step "password manager, then confirm to set it as a worker secret."
+step "password manager, then confirm to set it as the project's Pages secret."
 TOKEN=$(openssl rand -hex 24)
 printf '  %s%s\n' "$BOLD" "$TOKEN" "$RESET"
 pause "Copy the token, then press Enter to continue"
-confirm "Set this token as the worker secret SEND_TOKEN and write it to .env?" || {
+confirm "Set this token as the Pages project secret SEND_TOKEN and write it to .env?" || {
   note "Aborted — nothing was written."
   exit 0
 }
@@ -224,7 +240,7 @@ put_worker_secret SEND_TOKEN "$TOKEN"
 stage "Verify"
 say "Confirm the token is in place."
 step "SEND_TOKEN is in the repo .env (read by the loop's send_via_api.py)."
-step "SEND_TOKEN is a Cloudflare worker secret (required by POST /send)."
+step "SEND_TOKEN is a Cloudflare Pages secret (required by POST /send)."
 note "No archive token exists — send is the only archive writer."
 pause "Done"
 
