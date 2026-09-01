@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# DEPRECATED (2026-08-17): superseded by scripts/cron_digest.sh + system cron
+# (`30 11 * * * .../scripts/cron_digest.sh`). Do NOT re-arm the pi-loop —
+# the cron job already runs the digest daily; a loop would double-send.
+#
 # Wire the daily AI News Digest loop — 11:30 every day.
 #
 # The pi-loop extension tools (LoopCreate) are only available inside a pi

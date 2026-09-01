@@ -23,6 +23,9 @@ import pathlib
 import subprocess
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import digest_state  # noqa: E402
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
@@ -34,16 +37,27 @@ def main() -> int:
     cmd = sys.argv[1] if len(sys.argv) > 1 else "fetch"
 
     if cmd == "fetch":
-        bucket_f = [f"F-{a}" for a in ["mattpocockuk", "dexhorthy", "karpathy", "simonw",
-                                        "trq212", "jeremyphoward", "theo", "ClaudeDevs",
-                                        "alliekmiller", "pidotdev", "thdxr", "sama"]]
-        sh("phase1_discovery.py")
-        print("\nSTEP agent-select: read runs/phase1-discovery.json via "
-              "scripts/condense_phase1.py + prompts/select_topics.md, write runs/topics.json")
-        sh("phase2_followup.py")
-        sh("merge_candidates.py")
-        print("\nSTEP agent-filter: read runs/candidates.json against prompts/filter.md, "
-              "write runs/kept.json (or edit scripts/apply_filter.py KEEP map)")
+        # Savepoint: a finished fetch is skipped unless --force (never burn
+        # API calls on a rerun). Failures are marked so the next run retries.
+        if "--force" not in sys.argv and digest_state.is_ok("fetch"):
+            print(f"[savepoint] fetch already ok for {digest_state.today()} — skipping (--force to redo)")
+            return 0
+        try:
+            bucket_f = [f"F-{a}" for a in ["mattpocockuk", "dexhorthy", "karpathy", "simonw",
+                                            "trq212", "jeremyphoward", "theo", "ClaudeDevs",
+                                            "alliekmiller", "pidotdev", "thdxr", "sama"]]
+            sh("phase1_discovery.py")
+            print("\nSTEP agent-select: read runs/phase1-discovery.json via "
+                  "scripts/condense_phase1.py + prompts/select_topics.md, write runs/topics.json")
+            sh("phase2_followup.py")
+            sh("merge_candidates.py")
+            print("\nSTEP agent-filter: read runs/candidates.json against prompts/filter.md, "
+                  "write runs/kept.json (or edit scripts/apply_filter.py KEEP map)")
+        except Exception:
+            digest_state.mark("fetch", "failed")
+            raise
+        digest_state.mark("fetch", "ok")
+        print(f"[savepoint] fetch marked ok for {digest_state.today()}")
     elif cmd == "send":
         # send_via_api.py parses the newest drafts/digest-*.md itself (via
         # render_email.parse), sends the structured JSON to POST /send, and
