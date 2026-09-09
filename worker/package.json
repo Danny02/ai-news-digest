@@ -5,8 +5,8 @@
   "type": "module",
   "description": "Cloudflare Worker: AI news digest landing page, double-opt-in subscribe, daily broadcast, weekly archive.",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler pages deploy",
+    "dev": "npx wrangler pages dev",
+    "deploy": "npx wrangler pages deploy",
     "test": "node --test 'test/*.test.mjs'"
   }
 }
