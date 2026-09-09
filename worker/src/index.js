@@ -52,7 +52,7 @@ const WEEKLY = "weekly:";
 const FIRST_WEEK = "meta:first_week";
 
 const CACHE_FRESH = 60; // today / this week: a new issue must surface quickly
-const CACHE_SETTLED = 86400; // past issues and past weeks no longer change
+const CACHE_SETTLED = 86400; // past issues and weeks older than last week no longer change
 
 function json(res, status) {
   return new Response(JSON.stringify(res), {
@@ -555,7 +555,10 @@ async function handleArchiveWeek(env, weekKey, site) {
     nextWeek: next <= thisWeek ? next : null,
     site,
   });
-  return withCache(res, weekKey === thisWeek ? CACHE_FRESH : CACHE_SETTLED);
+  // Last week is not settled: Monday's weekly send writes into it. cache.delete()
+  // would only clear one colo, so the TTL is the invalidation.
+  const settled = weekKey < shiftWeek(thisWeek, -1);
+  return withCache(res, settled ? CACHE_SETTLED : CACHE_FRESH);
 }
 
 async function handleArchiveWeekJson(env, weekKey) {

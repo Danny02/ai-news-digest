@@ -221,7 +221,11 @@ test("settled pages cache for a day, live pages for a minute", async () => {
   const thisWeek = await get(env, "/archive/2026-W33");
   assert.equal(thisWeek.headers.get("cache-control"), "public, max-age=60");
 
-  const pastWeek = await get(env, "/archive/2026-W32");
+  // Last week stays live: Monday's weekly send still writes into it.
+  const lastWeek = await get(env, "/archive/2026-W32");
+  assert.equal(lastWeek.headers.get("cache-control"), "public, max-age=60");
+
+  const pastWeek = await get(env, "/archive/2026-W31");
   assert.equal(pastWeek.headers.get("cache-control"), "public, max-age=86400");
 
   const today = await get(env, `/archive/${TODAY}`);

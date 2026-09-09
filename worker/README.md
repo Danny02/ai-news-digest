@@ -147,9 +147,10 @@ code). Do not set it as a secret — a Pages secret of the same name would
 shadow the var.
 
 ### 4. Custom domain
-`ai-news.nullzwo.dev` is declarative in `wrangler.toml` (`routes` with
-`custom_domain = true`), so every `wrangler deploy` attaches it automatically.
-Requires the `nullzwo.dev` zone to be active in the same Cloudflare account.
+`ai-news.nullzwo.dev` is attached to the Pages project in the Cloudflare
+dashboard (Workers & Pages -> ai-news-digest -> Custom domains). It is not in
+`wrangler.toml`. Requires the `nullzwo.dev` zone to be active in the same
+Cloudflare account.
 
 > Note: the proxy env vars on this machine (`http_proxy`/`all_proxy` on
 > localhost) make `wrangler` fetch fail sometimes; retry, or unset `all_proxy`
@@ -163,8 +164,9 @@ cp .dev.vars.example .dev.vars   # fill in real values (NOT committed)
 npm run dev                      # wrangler dev
 ```
 `.dev.vars` holds `RESEND_API_KEY` and `SENDER`. `DAILY_SEGMENT_ID` and
-`WEEKLY_SEGMENT_ID` are public config values from `[vars]` in `wrangler.toml`;
-they are also listed in `.dev.vars.example` for local overrides.
+`WEEKLY_SEGMENT_ID` are public config values from `[vars]` in `wrangler.toml`.
+They are deliberately absent from `.dev.vars.example`: a `.dev.vars` entry
+shadows `[vars]` and would go stale.
 
 ## Deploy
 ```bash
