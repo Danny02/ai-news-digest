@@ -21,6 +21,28 @@ subscribers and keep a weekly archive on the web.
 4. **Read** — the site at the worker's origin shows the landing page, a
    subscription flow (double opt-in), and a weekly archive page.
 
+### Weekly edition
+
+The weekly run sends one Monday edition for the previous completed ISO week. It
+reads the published `GET /archive/<GGGG-Www>.json` response. It does not fetch
+new posts or run research. An agent condenses the archived issues by subject,
+deduplicates stories into their final state, and keeps at most five topics with
+at most four bullets each. The full ranking and writing rules live in
+[`prompts/weekly-condense.md`](prompts/weekly-condense.md).
+
+The weekly cron prompt is [`prompts/weekly-loop-cron.md`](prompts/weekly-loop-cron.md).
+Its run has three per-week savepoints in
+`runs/state-<GGGG-Www>.json`: `fetch`, `condense`, and `send`. The fetched input
+is kept in `runs/weekly-<GGGG-Www>.json`; the reviewable draft is
+`drafts/weekly-<GGGG-Www>.md`. The `weekly-` filename is separate from the
+daily sender's `drafts/digest-*.md` glob.
+
+The model writes the draft, then `scripts/send_weekly_via_api.py` posts it with
+`cadence: weekly`. The worker derives the week and refuses a duplicate send;
+a `409` is recorded as a successful savepoint. A missing or empty archive week
+is logged and exits without a draft or send. The daily pipeline and its
+`drafts/digest-<date>.md` behavior are unchanged.
+
 ## Layout
 
 ```
