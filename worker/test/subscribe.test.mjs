@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { makeEnv, makeResend, fetchWorker, SEGMENT_ID } from "./harness.mjs";
+import { makeEnv, makeResend, fetchWorker, DAILY_SEGMENT_ID } from "./harness.mjs";
 
 function setup() {
   const resend = makeResend();
@@ -159,7 +159,7 @@ test("the contact is created against the configured segment", async () => {
     return real(url, opts);
   };
   await confirmed(env, resend);
-  assert.deepEqual(created.segments, [{ id: SEGMENT_ID }]);
+  assert.deepEqual(created.segments, [{ id: DAILY_SEGMENT_ID }]);
 });
 
 test("a token works once", async () => {

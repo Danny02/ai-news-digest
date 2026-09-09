@@ -187,7 +187,7 @@ finish() {
 cd "$(dirname "$0")"
 ENV_FILE=".dev.vars"
 
-TOTAL_STAGES=6
+TOTAL_STAGES=5
 
 banner "AI News Digest worker setup"
 
@@ -226,17 +226,7 @@ ask_secret RESEND_API_KEY "Paste the Resend API key:"
 write_env RESEND_API_KEY "$RESEND_API_KEY"
 put_worker_secret RESEND_API_KEY "$RESEND_API_KEY"
 
-# ── Stage 3: Resend segment (mailing list) ─────────────────────────────────
-stage "Resend — create the segment"
-say "The mailing list is a Resend Segment. Confirmed subscribers get added to it."
-open_url "https://resend.com/segments"
-step "Click 'Create Segment', name it 'AI News Digest'."
-step "Open the segment; copy its Segment ID from the URL or detail view."
-ask_secret RESEND_SEGMENT_ID "Paste the Segment ID:"
-write_env RESEND_SEGMENT_ID "$RESEND_SEGMENT_ID"
-put_worker_secret RESEND_SEGMENT_ID "$RESEND_SEGMENT_ID"
-
-# ── Stage 4: SENDER value ──────────────────────────────────────────────────
+# ── Stage 3: SENDER value ──────────────────────────────────────────────────
 stage "SENDER — confirmation email sender"
 say "Used as the From address on the confirmation email."
 note "Already verified: digest@nullzwo.dev"
@@ -244,7 +234,7 @@ ask SENDER "SENDER (Enter for default): "
 [[ -z "$SENDER" ]] && SENDER="AI News Digest <digest@nullzwo.dev>"
 write_env SENDER "$SENDER"
 
-# ── Stage 5: Deploy ────────────────────────────────────────────────────────
+# ── Stage 4: Deploy ────────────────────────────────────────────────────────
 stage "Deploy the worker"
 say "Secrets are set. Next we deploy the worker to the edge."
 step "The custom domain ai-news.nullzwo.dev is already declarative in wrangler.toml —",
@@ -254,7 +244,7 @@ confirm "Deploy now with npx wrangler deploy?" && {
   printf '  %s✓%s deployed\n' "$GREEN" "$RESET"
 } || note "Skipped deploy — run 'npx wrangler deploy' in worker/ when ready."
 
-# ── Stage 6: Verify the live site ───────────────────────────────────────────
+# ── Stage 5: Verify the live site ───────────────────────────────────────────
 stage "Verify https://ai-news.nullzwo.dev"
 say "Confirm the landing page is reachable on the custom domain."
 open_url "https://ai-news.nullzwo.dev"
