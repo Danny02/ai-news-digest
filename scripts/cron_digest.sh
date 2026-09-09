@@ -20,12 +20,12 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO" || exit 1
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-# Pin a key-based provider on the CLI (flags beat settings.json defaults).
-# opencode-go has a plain key in ~/.pi/agent/auth.json; the claude-bridge
-# default (claude-opus-5) needs interactive OAuth and aborts headless runs
-# with "Not logged in". Env vars like PI_PROVIDER are ignored by pi 0.84.2.
-PROVIDER=opencode-go
-MODEL=deepseek-v4-flash
+# Pin the provider on the CLI (flags beat settings.json defaults). Env vars
+# like PI_PROVIDER are ignored by pi 0.84.2. claude-bridge rides the local
+# Claude CLI subscription, so it needs no auth.json key.
+PROVIDER=claude-bridge
+MODEL=claude-sonnet-5
+THINKING=medium
 
 # Load secrets from repo-root .env if present (never echoed).
 if [ -f .env ]; then
@@ -75,7 +75,7 @@ fi
 # Only inspect the lines appended by THIS run (the daily file accumulates).
 # tail streams directly into grep so a huge run cannot trigger a broken pipe.
 WC_BEFORE=$(wc -l < "$JSONL" 2>/dev/null || echo 0)
-/opt/homebrew/bin/pi --provider "$PROVIDER" --model "$MODEL" \
+/opt/homebrew/bin/pi --provider "$PROVIDER" --model "$MODEL" --thinking "$THINKING" \
   --mode json --no-session -p "$(cat "$PROMPT_FILE")" \
   >> "$JSONL" 2>> "$ERRL"
 RC=$?
