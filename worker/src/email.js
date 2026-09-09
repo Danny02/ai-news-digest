@@ -19,6 +19,23 @@ const STYLE = emailStyle({ ink: INK, body: BODY, mono: MONO });
 // Resend expands this into a per-contact one-click unsubscribe link.
 const UNSUBSCRIBE = "{{{RESEND_UNSUBSCRIBE_URL}}}";
 
+const COPY = {
+  daily: {
+    first: "Most AI news is noise.",
+    second: "Here is the rest.",
+    intro: "From public X posts, held to one bar: could this change how you work?",
+  },
+  weekly: {
+    first: "A week of AI news, distilled.",
+    second: "Here is what mattered.",
+    intro: "From the week's daily issues, held to one bar: could this change how you work?",
+  },
+};
+
+function copyFor(cadence) {
+  return COPY[cadence] || COPY.daily;
+}
+
 function item(md) {
   return (
     '<tr><td style="padding:8px 0;">' +
@@ -51,7 +68,8 @@ function theme(section) {
   );
 }
 
-export function buildEmailHtml(date, sections) {
+export function buildEmailHtml(date, sections, cadence = "daily") {
+  const copy = copyFor(cadence);
   return (
     '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8" />' +
     '<meta name="viewport" content="width=device-width, initial-scale=1" />' +
@@ -66,10 +84,10 @@ export function buildEmailHtml(date, sections) {
     `<td align="right" style="vertical-align:middle;"><span style="font-family:${MONO}; font-size:12px; ` +
     `letter-spacing:0.1em; color:${MUTED};">${escapeHtml(date)}</span></td></tr>` +
     `<tr><td colspan="2" style="padding-top:30px;"><div style="font-family:${SANS}; font-size:34px; line-height:1.02; ` +
-    `font-weight:800; letter-spacing:-0.04em; color:${MUTED};">Most AI news is noise.<br/>` +
-    '<span style="color:#ffffff;">Here is the rest.</span></div></td></tr>' +
+    `font-weight:800; letter-spacing:-0.04em; color:${MUTED};">${escapeHtml(copy.first)}<br/>` +
+    `<span style="color:#ffffff;">${escapeHtml(copy.second)}</span></div></td></tr>` +
     `<tr><td colspan="2" style="padding-top:18px; padding-bottom:4px;"><div style="font-size:14px; line-height:21px; ` +
-    `color:${MUTED}; padding-right:24px;">From public X posts, held to one bar: could this change how you work?</div></td></tr>` +
+    `color:${MUTED}; padding-right:24px;">${escapeHtml(copy.intro)}</div></td></tr>` +
     "</table></td></tr>" +
     sections.map(theme).join("") +
     '<tr><td style="padding:30px 6px 0 6px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">' +
@@ -80,8 +98,9 @@ export function buildEmailHtml(date, sections) {
   );
 }
 
-export function buildEmailText(date, sections) {
-  const lines = ["AI News Digest", date, "", "Most AI news is noise. Here is the rest.", ""];
+export function buildEmailText(date, sections, cadence = "daily") {
+  const copy = copyFor(cadence);
+  const lines = ["AI News Digest", date, "", `${copy.first} ${copy.second}`, ""];
   for (const section of sections) {
     lines.push("", section.title.toUpperCase());
     for (const md of section.items) lines.push("  \u2022 " + renderPlain(md));

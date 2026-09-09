@@ -5,7 +5,7 @@
  *   GET  /                     landing page
  *   POST /subscribe            validate, store a pending token, email a link
  *   GET  /confirm?token=       register the contact with Resend
- *   POST /send                 broadcast today's digest, archive it (bearer auth)
+ *   POST /send                 broadcast a daily or weekly digest (bearer auth)
  *   GET  /archive              302 to the current week
  *   GET  /archive/GGGG-Www     one week of issues
  *   GET  /archive/GGGG-Www.json one week of issues as JSON
@@ -14,7 +14,7 @@
  *
  * Bindings
  *   KV      DIGEST_PENDING   tok:<token> -> email, pend:<email> -> token (TTL'd)
- *   KV      DIGEST_ARCHIVE   issue:<date>, week:<weekKey>, meta:first_week
+ *   KV      DIGEST_ARCHIVE   issue:<date>, week:<weekKey>, weekly:<weekKey>, meta:first_week
  *   secret  RESEND_API_KEY, SEND_TOKEN
  *   var     DAILY_SEGMENT_ID, WEEKLY_SEGMENT_ID, SENDER, GC_SITE, SITE_DOMAIN (optional)
  *
@@ -42,6 +42,7 @@ const SEND_RESERVATION_TTL = 300; // seconds a crashed /send can block the day
 
 const ISSUE = "issue:";
 const WEEK = "week:";
+const WEEKLY = "weekly:";
 const FIRST_WEEK = "meta:first_week";
 
 const CACHE_FRESH = 60; // today / this week: a new issue must surface quickly
@@ -227,25 +228,17 @@ function validateSections(value) {
 }
 
 /**
- * Broadcast today's digest and archive it.
+ * Broadcast today's daily digest or the previous completed weekly digest.
  *
- * The issue date is always UTC today — the caller cannot pass one. Backfilling
- * or re-dating an issue would mean sending an email that contradicts the
- * archive, so the only supported operation is "send today's".
- *
- * Re-sending is refused: the archive key doubles as the record that today has
- * been sent. The key is reserved before the broadcast, so a crash between
- * broadcast and archive write cannot turn into a second email. KV is eventually
- * consistent, so this is a guard against retries and double-fires, not a lock
- * against two genuinely simultaneous callers.
+ * The caller cannot choose the period. Daily sends use UTC today; weekly sends
+ * shift the current ISO week back one. The period archive key doubles as the
+ * idempotency record and is reserved before the broadcast, so a retry cannot
+ * send the same edition twice.
  */
 async function handleSend(request, env) {
   const expected = `Bearer ${env.SEND_TOKEN || ""}`;
   if (!env.SEND_TOKEN || (request.headers.get("authorization") || "") !== expected) {
     return json({ error: "Unauthorized." }, 401);
-  }
-  if (!env.DAILY_SEGMENT_ID) {
-    return json({ error: "Sending is not configured (no segment)." }, 500);
   }
 
   let body;
@@ -254,47 +247,82 @@ async function handleSend(request, env) {
   } catch {
     return json({ error: "Invalid JSON body." }, 400);
   }
+
+  const cadence = body.cadence === undefined ? "daily" : body.cadence;
+  if (cadence !== "daily" && cadence !== "weekly") {
+    return json({ error: "cadence must be daily or weekly." }, 400);
+  }
+  const segment = cadence === "weekly" ? env.WEEKLY_SEGMENT_ID : env.DAILY_SEGMENT_ID;
+  if (!segment) {
+    return json({ error: "Sending is not configured (no segment)." }, 500);
+  }
+
   if ("date" in body) {
     return json({ error: "date is not accepted; /send always sends today's issue." }, 400);
+  }
+  if ("week" in body) {
+    return json({ error: "week is not accepted; /send derives the period." }, 400);
   }
   const invalid = validateSections(body.sections);
   if (invalid) return json({ error: invalid }, 400);
   const sections = body.sections;
 
   const date = todayUTC();
+  const week = cadence === "weekly" ? shiftWeek(weekKeyOf(date), -1) : null;
+  const period = week || date;
   const archive = env.DIGEST_ARCHIVE;
-  if (await archive.get(ISSUE + date)) {
+  const archiveKey = cadence === "weekly" ? WEEKLY + week : ISSUE + date;
+
+  if (await archive.get(archiveKey)) {
+    if (cadence === "weekly") {
+      return json({ error: `A weekly issue for ${week} was already sent.`, week }, 409);
+    }
     return json({ error: `An issue for ${date} was already sent.`, date }, 409);
   }
 
-  // Reserve the day before sending. The TTL means a worker that dies mid-send
-  // blocks the day for five minutes, not forever.
-  await archive.put(ISSUE + date, JSON.stringify({ date, status: "sending" }), {
+  if (cadence === "weekly") {
+    const index = await readJson(archive, WEEK + week);
+    if (!index || !Array.isArray(index.issues) || !index.issues.length) {
+      console.log(`No archived issues for ${week}; skipping weekly broadcast.`);
+      return json({ ok: true, week, skipped: true }, 200);
+    }
+  }
+
+  // Reserve the period before sending. The TTL means a worker that dies
+  // mid-send blocks the period for five minutes, not forever.
+  const reservation = cadence === "weekly" ? { week, status: "sending" } : { date, status: "sending" };
+  await archive.put(archiveKey, JSON.stringify(reservation), {
     expirationTtl: SEND_RESERVATION_TTL,
   });
 
   const subject =
     typeof body.subject === "string" && body.subject.trim()
       ? body.subject.trim()
-      : `AI news digest - ${date}`;
+      : cadence === "weekly"
+        ? `AI news digest - ${week}`
+        : `AI news digest - ${date}`;
 
   let broadcastId;
   try {
     broadcastId = await sendBroadcast(env, {
+      cadence,
       subject,
-      html: buildEmailHtml(date, sections),
-      text: buildEmailText(date, sections),
+      html: buildEmailHtml(period, sections, cadence),
+      text: buildEmailText(period, sections, cadence),
     });
   } catch (err) {
-    await archive.delete(ISSUE + date); // release the day so a retry can run
+    await archive.delete(archiveKey); // release the period so a retry can run
     console.error("broadcast failed", err);
     return json({ error: "Resend rejected the broadcast.", detail: String(err.message || err) }, 502);
   }
 
-  await archive.put(ISSUE + date, JSON.stringify({ date, subject, sections }));
-  await indexIssue(env, date, sections);
+  const published = cadence === "weekly" ? { week, subject, sections } : { date, subject, sections };
+  await archive.put(archiveKey, JSON.stringify(published));
+  if (cadence === "daily") await indexIssue(env, date, sections);
 
-  return json({ ok: true, date, broadcastId }, 200);
+  return cadence === "weekly"
+    ? json({ ok: true, week, broadcastId }, 200)
+    : json({ ok: true, date, broadcastId }, 200);
 }
 
 /**
@@ -339,7 +367,8 @@ async function readJson(kv, key) {
  * gets the broadcast rejected. `send: true` creates and sends in one call.
  * Success is 201.
  */
-async function sendBroadcast(env, { subject, html, text }) {
+async function sendBroadcast(env, { cadence = "daily", subject, html, text }) {
+  const segmentId = cadence === "weekly" ? env.WEEKLY_SEGMENT_ID : env.DAILY_SEGMENT_ID;
   const res = await fetch("https://api.resend.com/broadcasts", {
     method: "POST",
     headers: {
@@ -347,7 +376,7 @@ async function sendBroadcast(env, { subject, html, text }) {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      segment_id: env.DAILY_SEGMENT_ID,
+      segment_id: segmentId,
       from: env.SENDER || "AI News Digest <digest@nullzwo.dev>",
       subject,
       html,
@@ -428,6 +457,7 @@ async function sendConfirmEmail(env, request, email, token) {
 //
 //   issue:<YYYY-MM-DD>  { date, subject, sections }
 //   week:<GGGG-Www>     { week, issues: [{ date, lead, items }] }
+//   weekly:<GGGG-Www>   { week, subject, sections }
 //   meta:first_week     the earliest week key ever published
 //
 // Paging is by ISO week so every archive URL is a fixed cache key: a settled
@@ -435,8 +465,9 @@ async function sendConfirmEmail(env, request, email, token) {
 // navigation is arithmetic, so no page needs to know what else exists.
 
 async function handleArchiveWeek(env, weekKey, site) {
-  const [doc, firstWeek] = await Promise.all([
+  const [doc, weekly, firstWeek] = await Promise.all([
     readJson(env.DIGEST_ARCHIVE, WEEK + weekKey),
+    readJson(env.DIGEST_ARCHIVE, WEEKLY + weekKey),
     env.DIGEST_ARCHIVE.get(FIRST_WEEK),
   ]);
   const thisWeek = weekKeyOf(todayUTC());
@@ -447,6 +478,7 @@ async function handleArchiveWeek(env, weekKey, site) {
   const res = archiveWeekPage({
     weekKey,
     issues: (doc && doc.issues) || [],
+    weekly: weekly && Array.isArray(weekly.sections) && weekly.sections.length ? weekly : null,
     prevWeek: firstWeek && prev >= firstWeek ? prev : null,
     nextWeek: next <= thisWeek ? next : null,
     site,

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
   makeEnv,
   makeResend,
@@ -12,6 +13,8 @@ import {
 } from "./harness.mjs";
 
 const TODAY = "2026-08-14"; // Friday, ISO week 2026-W33
+// SHA-256 captured from the base worker's rendered response for this exact page.
+const LEGACY_WEEK_PAGE_SHA256 = "ce21f7184fd51a6cf621890e8886aab915db3a51520bc8220c58c34593b8386e";
 
 function setup() {
   const resend = makeResend();
@@ -51,6 +54,52 @@ test("a week page lists that week's issues, newest first", async () => {
   assert.ok(html.includes("Qwen 3.8 is coming open-weights"));
   assert.ok(html.includes('href="/archive/2026-08-13"'));
   assert.ok(html.includes("10–16 Aug 2026"));
+});
+
+test("a week page places the weekly edition above its day rows", async () => {
+  const { env } = setup();
+  const week = "2026-W33";
+  await env.DIGEST_ARCHIVE.put(
+    `week:${week}`,
+    JSON.stringify({ week, issues: [{ date: "2026-08-13", lead: "A daily lead", items: 1 }] })
+  );
+  await env.DIGEST_ARCHIVE.put(
+    `weekly:${week}`,
+    JSON.stringify({
+      week,
+      subject: "AI news digest - 2026-W33",
+      sections: [{ title: "The week changed the picture", label: "Weekly", items: ["The weekly item."] }],
+    })
+  );
+
+  const res = await get(env, `/archive/${week}`);
+  const html = await res.text();
+
+  assert.equal(res.status, 200);
+  assert.ok(html.includes("Weekly edition"));
+  assert.ok(html.includes("The week changed the picture"));
+  assert.ok(html.indexOf("Weekly edition") < html.indexOf('<span class="d">Date</span>'));
+  assert.ok(html.indexOf("AI news digest - 2026-W33") < html.indexOf("2026-08-13"));
+});
+
+test("a week page without a weekly edition keeps the legacy bytes", async () => {
+  const { env } = setup();
+  const week = "2026-W33";
+  await env.DIGEST_ARCHIVE.put(
+    `week:${week}`,
+    JSON.stringify({ week, issues: [{ date: TODAY, lead: "Qwen 3.8 is coming open-weights", items: 3 }] })
+  );
+  await env.DIGEST_ARCHIVE.put("meta:first_week", week);
+
+  const res = await get(env, `/archive/${week}`);
+  const bytes = Buffer.from(await res.arrayBuffer());
+  const digest = createHash("sha256").update(bytes).digest("hex");
+
+  assert.equal(
+    digest,
+    LEGACY_WEEK_PAGE_SHA256,
+    "without a weekly edition, the week page is byte-for-byte unchanged"
+  );
 });
 
 test("an empty week renders instead of 404ing", async () => {
