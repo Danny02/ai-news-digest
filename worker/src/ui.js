@@ -198,14 +198,22 @@ h1 .b{display:block;color:var(--ink)}
 .lead{margin:32px 0 0;max-width:46ch;font-size:clamp(16px,1.5vw,19px);line-height:1.55;color:var(--dim)}
 .lead b{color:var(--ink);font-weight:600}
 
-form{margin:40px 0 0;max-width:520px}
-.cadence{border:0;display:grid;gap:9px;margin:0 0 22px;padding:0;color:var(--dim);
-font:400 13px/1.4 var(--sans)}
-.cadence legend{margin-bottom:8px;color:var(--ink);font:600 11px/1 var(--sans);
-letter-spacing:.14em;text-transform:uppercase}
-.cadence label{display:flex;align-items:baseline;gap:8px;cursor:pointer}
-.cadence input{width:auto;margin:0;padding:0;accent-color:var(--ink)}
+form{margin:40px 0 0;max-width:640px}
 .signup{display:flex;align-items:stretch;gap:14px}
+.switch{position:relative;flex:0 0 auto;display:grid;grid-template-columns:1fr 1fr;
+border:1.5px solid var(--ink);margin:0;padding:0}
+.switch legend{position:absolute;width:1px;height:1px;overflow:hidden;
+clip:rect(0 0 0 0);white-space:nowrap}
+.switch input{position:absolute;width:1px;height:1px;margin:0;padding:0;opacity:0}
+.switch .thumb{position:absolute;top:0;left:0;width:50%;height:100%;background:var(--ink);
+transition:transform .18s}
+.switch label{position:relative;z-index:1;padding:14px 18px;text-align:center;cursor:pointer;
+color:var(--dim);font:700 13px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;
+transition:color .18s}
+.switch label:hover{color:var(--ink)}
+#cad-w:checked~.thumb{transform:translateX(100%)}
+#cad-d:checked~label[for=cad-d],#cad-w:checked~label[for=cad-w]{color:var(--bg)}
+.switch:has(input:focus-visible){outline:2px solid var(--ink);outline-offset:3px}
 .field{flex:1;min-width:0;display:flex;align-items:center;border-bottom:1.5px solid var(--faint);
 transition:border-color .2s}
 .field:focus-within{border-color:var(--ink)}
@@ -255,11 +263,13 @@ main{padding:16px 20px 32px}
 footer{padding:18px 20px}
 h1{letter-spacing:-.04em}
 .signup{flex-direction:column;gap:20px;align-items:stretch}
+.switch{width:100%}
 button[type=submit],.action{width:100%;text-align:center}
 .plate{background:radial-gradient(112% 60% at 50% 52%,var(--bg) 0 40%,transparent 88%),
 linear-gradient(var(--veil),var(--veil))}}
 @media(prefers-reduced-motion:reduce){
 .track,.bar b::before,.grain,.gl,.crt{animation:none}
+.switch .thumb,.switch label{transition:none}
 .gl{display:none}}
 `;
 }
@@ -314,12 +324,15 @@ export function landingPage(site = {}) {
 <h1><span class="a">Most AI news is noise.</span><span class="b">We send the rest.</span></h1>
 <p class="lead">Every weekday, or one mail on Monday covering the week. Coding agents, open weights and harness engineering &mdash; held to one bar: <b>could this change how you work?</b></p>
 <form id="f" action="/subscribe" method="post" novalidate>
-<fieldset class="cadence">
-<legend>How often should we write?</legend>
-<label><input type="radio" name="cadence" value="daily" checked> <span>Every weekday</span></label>
-<label><input type="radio" name="cadence" value="weekly"> <span>One mail on Monday covering the week</span></label>
-</fieldset>
 <div class="signup"><span class="field"><input id="email" name="email" type="email" placeholder="you@example.com" autocomplete="email" aria-label="Email address"></span>
+<fieldset class="switch">
+<legend>How often should we write?</legend>
+<input type="radio" id="cad-d" name="cadence" value="daily" checked>
+<input type="radio" id="cad-w" name="cadence" value="weekly">
+<span class="thumb" aria-hidden="true"></span>
+<label for="cad-d">Daily</label>
+<label for="cad-w">Weekly</label>
+</fieldset>
 <button type="submit">Subscribe</button></div>
 </form>
 <p class="meta"><span>Yesterday: 412 in, 6 out</span><span>Double opt-in</span><span>One click to leave</span></p>
