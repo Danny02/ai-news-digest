@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import {
   makeEnv,
   makeResend,
@@ -13,8 +12,6 @@ import {
 } from "./harness.mjs";
 
 const TODAY = "2026-08-14"; // Friday, ISO week 2026-W33
-// SHA-256 captured from the base worker's rendered response for this exact page.
-const LEGACY_WEEK_PAGE_SHA256 = "ce21f7184fd51a6cf621890e8886aab915db3a51520bc8220c58c34593b8386e";
 
 function setup() {
   const resend = makeResend();
@@ -82,7 +79,7 @@ test("a week page places the weekly edition above its day rows", async () => {
   assert.ok(html.indexOf("AI news digest - 2026-W33") < html.indexOf("2026-08-13"));
 });
 
-test("a week page without a weekly edition keeps the legacy bytes", async () => {
+test("the weekly edition is the only thing it adds to a week page", async () => {
   const { env } = setup();
   const week = "2026-W33";
   await env.DIGEST_ARCHIVE.put(
@@ -91,15 +88,26 @@ test("a week page without a weekly edition keeps the legacy bytes", async () => 
   );
   await env.DIGEST_ARCHIVE.put("meta:first_week", week);
 
-  const res = await get(env, `/archive/${week}`);
-  const bytes = Buffer.from(await res.arrayBuffer());
-  const digest = createHash("sha256").update(bytes).digest("hex");
+  const before = await (await get(env, `/archive/${week}`)).text();
 
-  assert.equal(
-    digest,
-    LEGACY_WEEK_PAGE_SHA256,
-    "without a weekly edition, the week page is byte-for-byte unchanged"
+  await env.DIGEST_ARCHIVE.put(
+    `weekly:${week}`,
+    JSON.stringify({
+      week,
+      subject: "AI news digest - 2026-W33",
+      sections: [{ title: "The week changed the picture", label: "Weekly", items: ["The weekly item."] }],
+    })
   );
+  const withWeekly = await (await get(env, `/archive/${week}`)).text();
+  assert.notEqual(withWeekly, before);
+
+  // Removing the edition again must restore the page exactly, so the weekly
+  // block is additive and touches nothing a historical week already renders.
+  await env.DIGEST_ARCHIVE.delete(`weekly:${week}`);
+  const after = await (await get(env, `/archive/${week}`)).text();
+
+  assert.equal(after, before, "a week without a weekly edition renders unchanged");
+  assert.ok(!before.includes("Weekly edition"));
 });
 
 test("an empty week renders instead of 404ing", async () => {

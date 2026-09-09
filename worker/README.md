@@ -17,16 +17,19 @@ writes local values to `.dev.vars` and sets project secrets via
 
 # Cloudflare Worker — AI News Digest mailing list
 
-Landing page under `ai-news.nullzwo.dev` with a single subscribe input, plus
-double opt-in registration into a Resend mailing list.
+Landing page under `ai-news.nullzwo.dev` with a daily-or-weekly subscribe
+choice, plus double opt-in registration into the matching Resend segment.
 
 ## Flow
 
-1. `GET /` — landing page, one email field.
-2. `POST /subscribe` — validates the email, stores a 7-day pending token in KV,
-   emails a confirmation link.
-3. `GET /confirm?token=…` — the click handler; calls Resend to register the
-   email as a contact in the segment (mailing list), then deletes the token.
+1. `GET /` — landing page with an email field and a daily-or-weekly choice.
+2. `POST /subscribe` — validates the email and cadence, stores a 7-day pending
+   token in KV, and emails a confirmation link.
+3. `GET /confirm?token=…` — the click handler; adds the contact to the chosen
+   segment, removes it from the other segment, then deletes the token.
+
+The two valid cadence values are `daily` (every weekday) and `weekly` (one mail
+on Monday covering the week). A missing cadence is treated as `daily`.
 
 Unsubscribe is handled by Resend's hosted page (add
 `{{{RESEND_UNSUBSCRIBE_URL}}}` to the daily digest template).
@@ -83,8 +86,10 @@ page needs to know what else exists.
 
 **There is no `list()` call in the worker.** Every lookup — pending tokens,
 week pages, issues — is a direct key read. Pending subscriptions are stored
-twice (`tok:<token>` and `pend:<email>`) precisely so the subscribe dedupe is
-O(1) rather than a scan of the namespace.
+twice
+(`tok:<token>` contains `{ email, cadence }` and `pend:<email>` contains the
+token) precisely so the subscribe dedupe is O(1) rather than a scan of the
+namespace. Legacy bare-email token values are treated as `daily` at confirmation.
 
 ## Tests
 
@@ -124,8 +129,9 @@ DAILY_SEGMENT_ID = "d95ca2ac-b89d-4939-b1d0-c8745e139b86"
 WEEKLY_SEGMENT_ID = "a05fac9d-a5e9-4d70-a1fc-62e200038e71"
 ```
 
-The daily send and contact-registration paths use `DAILY_SEGMENT_ID`.
-`WEEKLY_SEGMENT_ID` is used by weekly sends. Do not set either ID as a secret.
+The daily send uses `DAILY_SEGMENT_ID` and the weekly send uses
+`WEEKLY_SEGMENT_ID`. Confirmation adds each contact to its chosen segment and
+removes it from the other one. Do not set either ID as a secret.
 
 ### 3. Secrets (Pages project — run from the worker dir)
 ```bash
