@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { makeEnv, makeResend, fetchWorker, SEGMENT_ID } from "./harness.mjs";
+import { makeEnv, makeResend, fetchWorker, DAILY_SEGMENT_ID, WEEKLY_SEGMENT_ID } from "./harness.mjs";
 
 function setup() {
   const resend = makeResend();
@@ -10,8 +10,8 @@ function setup() {
 
 const post = (env, body) => fetchWorker("POST", "/subscribe", { body }, env);
 
-async function subscribe(env, email) {
-  const res = await post(env, { email });
+async function subscribe(env, email, cadence) {
+  const res = await post(env, cadence === undefined ? { email } : { email, cadence });
   return { res, body: await res.json() };
 }
 
@@ -35,6 +35,29 @@ test("rejects a non-JSON body", async () => {
   assert.equal(res.status, 400);
 });
 
+test("accepts daily and weekly cadence choices", async () => {
+  const { env, resend } = setup();
+  for (const [email, cadence, phrase] of [
+    ["daily@example.com", "daily", "every weekday"],
+    ["weekly@example.com", "weekly", "one mail on Monday covering the week"],
+  ]) {
+    const { res, body } = await subscribe(env, email, cadence);
+    assert.equal(res.status, 200);
+    assert.deepEqual(body, { ok: true, detail: "confirmation_sent" });
+    const token = tokenFrom(resend);
+    assert.deepEqual(JSON.parse(await env.DIGEST_PENDING.get(`tok:${token}`)), { email, cadence });
+    assert.match(resend.state.emails.at(-1).text, new RegExp(`Your choice: ${phrase}\\.`));
+  }
+});
+
+test("rejects an invalid cadence as a client error", async () => {
+  const { env, resend } = setup();
+  const { res, body } = await subscribe(env, "reader@example.com", "monthly");
+  assert.equal(res.status, 400);
+  assert.match(body.error, /daily or weekly/);
+  assert.equal(resend.state.emails.length, 0);
+});
+
 test("a new address gets one confirmation email and two KV keys", async () => {
   const { env, resend } = setup();
   const { res, body } = await subscribe(env, "reader@example.com");
@@ -46,7 +69,10 @@ test("a new address gets one confirmation email and two KV keys", async () => {
 
   const token = tokenFrom(resend);
   assert.ok(token, "confirmation email carries a token link");
-  assert.equal(await env.DIGEST_PENDING.get(`tok:${token}`), "reader@example.com");
+  assert.deepEqual(JSON.parse(await env.DIGEST_PENDING.get(`tok:${token}`)), {
+    email: "reader@example.com",
+    cadence: "daily",
+  });
   assert.equal(await env.DIGEST_PENDING.get("pend:reader@example.com"), token);
 });
 
@@ -135,6 +161,25 @@ async function confirmed(env, resend, email = "reader@example.com") {
   return { token, res, html: await res.text() };
 }
 
+test("a legacy bare-string pending record confirms as daily", async () => {
+  const { env, resend } = setup();
+  const token = "legacy-token";
+  await env.DIGEST_PENDING.put(`tok:${token}`, "reader@example.com", { expirationTtl: 3600 });
+
+  const res = await fetchWorker("GET", `/confirm?token=${token}`, {}, env);
+  const html = await res.text();
+
+  assert.equal(res.status, 200);
+  assert.match(html, /Every weekday/);
+  assert.deepEqual(resend.state.segmentAdds.at(-1), {
+    email: "reader@example.com",
+    segments: [{ id: DAILY_SEGMENT_ID }],
+  });
+  assert.deepEqual(resend.state.segmentRemovals, [
+    { email: "reader@example.com", segmentId: WEEKLY_SEGMENT_ID },
+  ]);
+});
+
 test("confirming registers the contact in the segment and clears both keys", async () => {
   const { env, resend } = setup();
   const { token, res, html } = await confirmed(env, resend);
@@ -148,6 +193,29 @@ test("confirming registers the contact in the segment and clears both keys", asy
   assert.equal(await env.DIGEST_PENDING.get("pend:reader@example.com"), null, "reverse key must go too");
 });
 
+test("a weekly confirmation switches membership to weekly only", async () => {
+  const { env, resend } = setup();
+  resend.seedContact("reader@example.com", false, [DAILY_SEGMENT_ID]);
+
+  const { res: subscribeRes } = await subscribe(env, "reader@example.com", "weekly");
+  assert.equal(subscribeRes.status, 200);
+  const token = tokenFrom(resend);
+  const res = await fetchWorker("GET", `/confirm?token=${token}`, {}, env);
+  const html = await res.text();
+
+  assert.equal(res.status, 200);
+  assert.match(html, /One mail on Monday covering the week/);
+  assert.deepEqual(resend.state.segmentAdds.at(-1), {
+    email: "reader@example.com",
+    segments: [{ id: WEEKLY_SEGMENT_ID }],
+  });
+  assert.deepEqual(resend.state.segmentRemovals.at(-1), {
+    email: "reader@example.com",
+    segmentId: DAILY_SEGMENT_ID,
+  });
+  assert.deepEqual(resend.state.contactSegments.get("reader@example.com"), new Set([WEEKLY_SEGMENT_ID]));
+});
+
 test("the contact is created against the configured segment", async () => {
   const { env, resend } = setup();
   const real = globalThis.fetch;
@@ -159,7 +227,7 @@ test("the contact is created against the configured segment", async () => {
     return real(url, opts);
   };
   await confirmed(env, resend);
-  assert.deepEqual(created.segments, [{ id: SEGMENT_ID }]);
+  assert.deepEqual(created.segments, [{ id: DAILY_SEGMENT_ID }]);
 });
 
 test("a token works once", async () => {
@@ -179,6 +247,31 @@ test("an unknown or missing token is a friendly page, not an error", async () =>
   assert.ok((await missing.text()).includes("Half a link"));
 });
 
+test("a switch that fails half way leaves the reader in neither cadence", async () => {
+  const { env, resend } = setup();
+  resend.seedContact("reader@example.com", false, [DAILY_SEGMENT_ID]);
+  await subscribe(env, "reader@example.com", "weekly");
+  const token = tokenFrom(resend);
+
+  resend.state.fail = "contact";
+  const res = await fetchWorker("GET", `/confirm?token=${token}`, {}, env);
+
+  assert.equal(res.status, 500);
+  assert.deepEqual(
+    resend.state.contactSegments.get("reader@example.com"),
+    new Set(),
+    "two mails on a Monday is worse than none: never hold both segments"
+  );
+
+  resend.state.fail = null;
+  const retry = await fetchWorker("GET", `/confirm?token=${token}`, {}, env);
+  assert.ok((await retry.text()).includes("Subscription confirmed"));
+  assert.deepEqual(
+    resend.state.contactSegments.get("reader@example.com"),
+    new Set([WEEKLY_SEGMENT_ID])
+  );
+});
+
 test("a failed registration keeps the token usable", async () => {
   const { env, resend } = setup();
   await subscribe(env, "reader@example.com");
@@ -187,7 +280,11 @@ test("a failed registration keeps the token usable", async () => {
   resend.state.fail = "contact";
   const res = await fetchWorker("GET", `/confirm?token=${token}`, {}, env);
   assert.equal(res.status, 500);
-  assert.equal(await env.DIGEST_PENDING.get(`tok:${token}`), "reader@example.com", "token survives");
+  assert.deepEqual(
+    JSON.parse(await env.DIGEST_PENDING.get(`tok:${token}`)),
+    { email: "reader@example.com", cadence: "daily" },
+    "token survives"
+  );
 
   resend.state.fail = null;
   const retry = await fetchWorker("GET", `/confirm?token=${token}`, {}, env);

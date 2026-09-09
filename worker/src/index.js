@@ -5,17 +5,18 @@
  *   GET  /                     landing page
  *   POST /subscribe            validate, store a pending token, email a link
  *   GET  /confirm?token=       register the contact with Resend
- *   POST /send                 broadcast today's digest, archive it (bearer auth)
+ *   POST /send                 broadcast a daily or weekly digest (bearer auth)
  *   GET  /archive              302 to the current week
  *   GET  /archive/GGGG-Www     one week of issues
+ *   GET  /archive/GGGG-Www.json one week of issues as JSON
  *   GET  /archive/YYYY-MM-DD   one issue
  *   GET  /bg.jpg               inlined background image
  *
  * Bindings
- *   KV      DIGEST_PENDING   tok:<token> -> email, pend:<email> -> token (TTL'd)
- *   KV      DIGEST_ARCHIVE   issue:<date>, week:<weekKey>, meta:first_week
- *   secret  RESEND_API_KEY, RESEND_SEGMENT_ID, SEND_TOKEN
- *   var     SENDER, GC_SITE, SITE_DOMAIN (optional)
+ *   KV      DIGEST_PENDING   tok:<token> -> {email,cadence}, pend:<email> -> token (TTL'd)
+ *   KV      DIGEST_ARCHIVE   issue:<date>, week:<weekKey>, weekly:<weekKey>, meta:first_week
+ *   secret  RESEND_API_KEY, SEND_TOKEN
+ *   var     DAILY_SEGMENT_ID, WEEKLY_SEGMENT_ID, SENDER, GC_SITE, SITE_DOMAIN (optional)
  *
  * No KV `list()` is used anywhere: every lookup is a direct key read. See
  * `pendingKeys` and the week index for why.
@@ -38,13 +39,20 @@ const TTL_SECONDS = 7 * 24 * 60 * 60; // pending token validity: 7 days
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const EMAIL_MAX = 254; // RFC 5321 address limit; also bounds the KV key
 const SEND_RESERVATION_TTL = 300; // seconds a crashed /send can block the day
+const VALID_CADENCES = new Set(["daily", "weekly"]);
+
+// A cadence is exclusive: every reader is in one segment and not the other.
+const segmentFor = (env, cadence) =>
+  cadence === "weekly" ? env.WEEKLY_SEGMENT_ID : env.DAILY_SEGMENT_ID;
+const other = (cadence) => (cadence === "weekly" ? "daily" : "weekly");
 
 const ISSUE = "issue:";
 const WEEK = "week:";
+const WEEKLY = "weekly:";
 const FIRST_WEEK = "meta:first_week";
 
 const CACHE_FRESH = 60; // today / this week: a new issue must surface quickly
-const CACHE_SETTLED = 86400; // past issues and past weeks no longer change
+const CACHE_SETTLED = 86400; // past issues and weeks older than last week no longer change
 
 function json(res, status) {
   return new Response(JSON.stringify(res), {
@@ -57,8 +65,8 @@ function json(res, status) {
 //
 // Two keys per pending subscription, written and expired together:
 //
-//   tok:<token>   -> email   read by /confirm
-//   pend:<email>  -> token   read by /subscribe to dedupe
+//   tok:<token>   -> { email, cadence }   read by /confirm
+//   pend:<email>  -> token               read by /subscribe to dedupe
 //
 // The reverse key is what makes the dedupe O(1). The previous version listed
 // the whole namespace and read every value on every request, which capped out
@@ -69,6 +77,26 @@ const pendingKeys = {
   email: (email) => `pend:${email}`,
 };
 
+function pendingSubscription(value) {
+  if (typeof value !== "string") return null;
+
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed.email === "string" && parsed.email) {
+      return {
+        email: parsed.email,
+        cadence: VALID_CADENCES.has(parsed.cadence) ? parsed.cadence : "daily",
+        legacy: false,
+      };
+    }
+  } catch {
+    // Before cadence support, the token key held the bare email string.
+  }
+
+  if (EMAIL_RE.test(value)) return { email: value, cadence: "daily", legacy: true };
+  return null;
+}
+
 async function handleSubscribe(request, env) {
   let body;
   try {
@@ -76,32 +104,51 @@ async function handleSubscribe(request, env) {
   } catch {
     return json({ error: "Invalid JSON body." }, 400);
   }
-  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+  const cadenceProvided =
+    body && typeof body === "object" && Object.prototype.hasOwnProperty.call(body, "cadence");
+  const cadence = cadenceProvided ? body.cadence : "daily";
   if (!EMAIL_RE.test(email) || email.length > EMAIL_MAX) {
     return json({ error: "Enter a valid email address." }, 400);
   }
+  if (!VALID_CADENCES.has(cadence)) {
+    return json({ error: "Cadence must be daily or weekly." }, 400);
+  }
 
-  // Already on the list: report success without sending anything. The response
-  // must not tell the caller whether an address is subscribed.
-  if (await isAlreadySubscribed(env, email)) {
+  // An old caller that sends only an email keeps the existing idempotent
+  // behaviour. An explicit cadence is a deliberate re-subscription, which
+  // allows a confirmed contact to switch after double opt-in.
+  if (!cadenceProvided && (await isAlreadySubscribed(env, email))) {
     return json({ ok: true, detail: "confirmation_sent" }, 200);
   }
 
   // A pending token already exists: resend it rather than minting a second one,
-  // so the earlier email in the inbox keeps working.
+  // so the earlier email in the inbox keeps working. New-format pending
+  // subscriptions follow the latest explicit choice; legacy bare strings stay
+  // daily because their link was issued before cadence support.
   const existing = await env.DIGEST_PENDING.get(pendingKeys.email(email));
   if (existing) {
-    await sendConfirmEmail(env, request, email, existing);
+    const stored = pendingSubscription(await env.DIGEST_PENDING.get(pendingKeys.token(existing)));
+    let selected = stored?.cadence || cadence;
+    if (stored && !stored.legacy && stored.email === email && stored.cadence !== cadence) {
+      selected = cadence;
+      const opts = { expirationTtl: TTL_SECONDS };
+      await Promise.all([
+        env.DIGEST_PENDING.put(pendingKeys.token(existing), JSON.stringify({ email, cadence }), opts),
+        env.DIGEST_PENDING.put(pendingKeys.email(email), existing, opts),
+      ]);
+    }
+    await sendConfirmEmail(env, request, email, existing, selected);
     return json({ ok: true, detail: "confirmation_resent" }, 200);
   }
 
   const token = randomToken();
   const opts = { expirationTtl: TTL_SECONDS };
   await Promise.all([
-    env.DIGEST_PENDING.put(pendingKeys.token(token), email, opts),
+    env.DIGEST_PENDING.put(pendingKeys.token(token), JSON.stringify({ email, cadence }), opts),
     env.DIGEST_PENDING.put(pendingKeys.email(email), token, opts),
   ]);
-  await sendConfirmEmail(env, request, email, token);
+  await sendConfirmEmail(env, request, email, token, cadence);
   return json({ ok: true, detail: "confirmation_sent" }, 200);
 }
 
@@ -146,8 +193,8 @@ async function handleConfirm(request, env, url, site) {
     });
   }
 
-  const email = await env.DIGEST_PENDING.get(pendingKeys.token(token));
-  if (!email) {
+  const pending = pendingSubscription(await env.DIGEST_PENDING.get(pendingKeys.token(token)));
+  if (!pending) {
     return statusPage({
       kicker: "Link expired",
       a: "That link is spent.",
@@ -162,8 +209,14 @@ async function handleConfirm(request, env, url, site) {
     });
   }
 
+  const { email, cadence } = pending;
   try {
-    await registerContact(env, email);
+    // Remove first. If the add fails afterwards the reader is in neither
+    // segment and the token still works, so a retry fixes it. Adding first
+    // would leave them in both on a failed removal, which is two mails on a
+    // Monday — the exact thing the cadence choice exists to prevent.
+    await removeContact(env, email, segmentFor(env, other(cadence)));
+    await registerContact(env, email, cadence);
   } catch (err) {
     console.error("register failed", err);
     return statusPage({
@@ -190,11 +243,13 @@ async function handleConfirm(request, env, url, site) {
   return statusPage({
     kicker: "Subscription confirmed",
     a: "You cleared the bar.",
-    b: "First issue tomorrow.",
+    b: cadence === "weekly" ? "First mail Monday." : "First issue tomorrow.",
     receipt: escapeHtml(email),
     chip: "PASS",
     spec: [
-      "<b>Daily</b>, one email. Nothing else.",
+      cadence === "weekly"
+        ? "<b>One mail on Monday covering the week.</b> Nothing else."
+        : "<b>Every weekday.</b> One email. Nothing else.",
       "<b>~500 words</b>, five themes, under a minute to scan.",
       "<b>One click</b> in any issue takes you off the list.",
     ],
@@ -226,25 +281,17 @@ function validateSections(value) {
 }
 
 /**
- * Broadcast today's digest and archive it.
+ * Broadcast today's daily digest or the previous completed weekly digest.
  *
- * The issue date is always UTC today — the caller cannot pass one. Backfilling
- * or re-dating an issue would mean sending an email that contradicts the
- * archive, so the only supported operation is "send today's".
- *
- * Re-sending is refused: the archive key doubles as the record that today has
- * been sent. The key is reserved before the broadcast, so a crash between
- * broadcast and archive write cannot turn into a second email. KV is eventually
- * consistent, so this is a guard against retries and double-fires, not a lock
- * against two genuinely simultaneous callers.
+ * The caller cannot choose the period. Daily sends use UTC today; weekly sends
+ * shift the current ISO week back one. The period archive key doubles as the
+ * idempotency record and is reserved before the broadcast, so a retry cannot
+ * send the same edition twice.
  */
 async function handleSend(request, env) {
   const expected = `Bearer ${env.SEND_TOKEN || ""}`;
   if (!env.SEND_TOKEN || (request.headers.get("authorization") || "") !== expected) {
     return json({ error: "Unauthorized." }, 401);
-  }
-  if (!env.RESEND_SEGMENT_ID) {
-    return json({ error: "Sending is not configured (no segment)." }, 500);
   }
 
   let body;
@@ -253,47 +300,82 @@ async function handleSend(request, env) {
   } catch {
     return json({ error: "Invalid JSON body." }, 400);
   }
+
+  const cadence = body.cadence === undefined ? "daily" : body.cadence;
+  if (cadence !== "daily" && cadence !== "weekly") {
+    return json({ error: "cadence must be daily or weekly." }, 400);
+  }
+  const segment = segmentFor(env, cadence);
+  if (!segment) {
+    return json({ error: "Sending is not configured (no segment)." }, 500);
+  }
+
   if ("date" in body) {
     return json({ error: "date is not accepted; /send always sends today's issue." }, 400);
+  }
+  if ("week" in body) {
+    return json({ error: "week is not accepted; /send derives the period." }, 400);
   }
   const invalid = validateSections(body.sections);
   if (invalid) return json({ error: invalid }, 400);
   const sections = body.sections;
 
   const date = todayUTC();
+  const week = cadence === "weekly" ? shiftWeek(weekKeyOf(date), -1) : null;
+  const period = week || date;
   const archive = env.DIGEST_ARCHIVE;
-  if (await archive.get(ISSUE + date)) {
+  const archiveKey = cadence === "weekly" ? WEEKLY + week : ISSUE + date;
+
+  if (await archive.get(archiveKey)) {
+    if (cadence === "weekly") {
+      return json({ error: `A weekly issue for ${week} was already sent.`, week }, 409);
+    }
     return json({ error: `An issue for ${date} was already sent.`, date }, 409);
   }
 
-  // Reserve the day before sending. The TTL means a worker that dies mid-send
-  // blocks the day for five minutes, not forever.
-  await archive.put(ISSUE + date, JSON.stringify({ date, status: "sending" }), {
+  if (cadence === "weekly") {
+    const index = await readJson(archive, WEEK + week);
+    if (!index || !Array.isArray(index.issues) || !index.issues.length) {
+      console.log(`No archived issues for ${week}; skipping weekly broadcast.`);
+      return json({ ok: true, week, skipped: true }, 200);
+    }
+  }
+
+  // Reserve the period before sending. The TTL means a worker that dies
+  // mid-send blocks the period for five minutes, not forever.
+  const reservation = cadence === "weekly" ? { week, status: "sending" } : { date, status: "sending" };
+  await archive.put(archiveKey, JSON.stringify(reservation), {
     expirationTtl: SEND_RESERVATION_TTL,
   });
 
   const subject =
     typeof body.subject === "string" && body.subject.trim()
       ? body.subject.trim()
-      : `AI news digest - ${date}`;
+      : cadence === "weekly"
+        ? `AI news digest - ${week}`
+        : `AI news digest - ${date}`;
 
   let broadcastId;
   try {
     broadcastId = await sendBroadcast(env, {
+      cadence,
       subject,
-      html: buildEmailHtml(date, sections),
-      text: buildEmailText(date, sections),
+      html: buildEmailHtml(period, sections, cadence),
+      text: buildEmailText(period, sections, cadence),
     });
   } catch (err) {
-    await archive.delete(ISSUE + date); // release the day so a retry can run
+    await archive.delete(archiveKey); // release the period so a retry can run
     console.error("broadcast failed", err);
     return json({ error: "Resend rejected the broadcast.", detail: String(err.message || err) }, 502);
   }
 
-  await archive.put(ISSUE + date, JSON.stringify({ date, subject, sections }));
-  await indexIssue(env, date, sections);
+  const published = cadence === "weekly" ? { week, subject, sections } : { date, subject, sections };
+  await archive.put(archiveKey, JSON.stringify(published));
+  if (cadence === "daily") await indexIssue(env, date, sections);
 
-  return json({ ok: true, date, broadcastId }, 200);
+  return cadence === "weekly"
+    ? json({ ok: true, week, broadcastId }, 200)
+    : json({ ok: true, date, broadcastId }, 200);
 }
 
 /**
@@ -338,7 +420,8 @@ async function readJson(kv, key) {
  * gets the broadcast rejected. `send: true` creates and sends in one call.
  * Success is 201.
  */
-async function sendBroadcast(env, { subject, html, text }) {
+async function sendBroadcast(env, { cadence = "daily", subject, html, text }) {
+  const segmentId = segmentFor(env, cadence);
   const res = await fetch("https://api.resend.com/broadcasts", {
     method: "POST",
     headers: {
@@ -346,7 +429,7 @@ async function sendBroadcast(env, { subject, html, text }) {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      segment_id: env.RESEND_SEGMENT_ID,
+      segment_id: segmentId,
       from: env.SENDER || "AI News Digest <digest@nullzwo.dev>",
       subject,
       html,
@@ -359,31 +442,49 @@ async function sendBroadcast(env, { subject, html, text }) {
   return data && data.id;
 }
 
-async function registerContact(env, email) {
+async function registerContact(env, email, cadence) {
+  const segmentId = segmentFor(env, cadence);
   const res = await fetch("https://api.resend.com/contacts", {
     method: "POST",
     headers: {
       authorization: `Bearer ${env.RESEND_API_KEY}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ email, segments: [{ id: env.RESEND_SEGMENT_ID }] }),
+    body: JSON.stringify({ email, segments: [{ id: segmentId }] }),
   });
   if (!res.ok) throw new Error(`Resend create contact ${res.status}: ${await res.text()}`);
 }
 
-async function sendConfirmEmail(env, request, email, token) {
+async function removeContact(env, email, segmentId) {
+  const res = await fetch(
+    `https://api.resend.com/contacts/${encodeURIComponent(email)}/segments/${encodeURIComponent(segmentId)}`,
+    {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${env.RESEND_API_KEY}` },
+    }
+  );
+  // A first-time subscriber was never in the other cadence, so 404 is the
+  // expected answer, not a failure. Treating it as one would break every
+  // first confirmation.
+  if (res.status === 404) return;
+  if (!res.ok) throw new Error(`Resend remove contact segment ${res.status}: ${await res.text()}`);
+}
+
+async function sendConfirmEmail(env, request, email, token, cadence) {
   const origin = env.SITE_DOMAIN ? `https://${env.SITE_DOMAIN}` : new URL(request.url).origin;
   const link = `${origin}/confirm?token=${encodeURIComponent(token)}`;
   const fromIdent = env.SENDER || "AI News Digest <digest@nullzwo.dev>";
   const fromAddr = (fromIdent.match(/<([^<>]+)>/) || [])[1] || fromIdent;
   const sans = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
   const mono = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
+  const cadenceText = cadence === "weekly" ? "one mail on Monday covering the week" : "every weekday";
   const htmlBody = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#000000;margin:0;padding:0">
 <tr><td align="center" style="padding:40px 20px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px">
 <tr><td style="font-family:${sans};font-size:11px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:#7a7a7a;padding-bottom:26px">AI News Digest</td></tr>
 <tr><td style="font-family:${sans};font-size:34px;line-height:1.05;letter-spacing:-.035em;font-weight:800;color:#7a7a7a">One click left.<br><span style="color:#ffffff">Then you're on.</span></td></tr>
 <tr><td style="font-family:${sans};font-size:15px;line-height:1.55;color:#b8b8b8;padding-top:22px">Confirm this address to start receiving the digest. If you did not ask for it, ignore this email and nothing happens.</td></tr>
+<tr><td style="font-family:${sans};font-size:15px;line-height:1.55;color:#ffffff;padding-top:18px">Your choice: ${cadenceText}.</td></tr>
 <tr><td style="padding-top:30px">
 <table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="background:#ffffff">
 <a href="${link}" style="display:inline-block;padding:15px 28px;font-family:${sans};font-size:13px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#000000;text-decoration:none">Confirm subscription</a>
@@ -397,6 +498,7 @@ async function sendConfirmEmail(env, request, email, token) {
     "AI News Digest",
     "",
     "Confirm this address to start receiving the digest:",
+    `Your choice: ${cadenceText}.`,
     link,
     "",
     "The link is valid for 7 days and works once.",
@@ -427,6 +529,7 @@ async function sendConfirmEmail(env, request, email, token) {
 //
 //   issue:<YYYY-MM-DD>  { date, subject, sections }
 //   week:<GGGG-Www>     { week, issues: [{ date, lead, items }] }
+//   weekly:<GGGG-Www>   { week, subject, sections }
 //   meta:first_week     the earliest week key ever published
 //
 // Paging is by ISO week so every archive URL is a fixed cache key: a settled
@@ -434,8 +537,9 @@ async function sendConfirmEmail(env, request, email, token) {
 // navigation is arithmetic, so no page needs to know what else exists.
 
 async function handleArchiveWeek(env, weekKey, site) {
-  const [doc, firstWeek] = await Promise.all([
+  const [doc, weekly, firstWeek] = await Promise.all([
     readJson(env.DIGEST_ARCHIVE, WEEK + weekKey),
+    readJson(env.DIGEST_ARCHIVE, WEEKLY + weekKey),
     env.DIGEST_ARCHIVE.get(FIRST_WEEK),
   ]);
   const thisWeek = weekKeyOf(todayUTC());
@@ -446,10 +550,38 @@ async function handleArchiveWeek(env, weekKey, site) {
   const res = archiveWeekPage({
     weekKey,
     issues: (doc && doc.issues) || [],
+    weekly: weekly && Array.isArray(weekly.sections) && weekly.sections.length ? weekly : null,
     prevWeek: firstWeek && prev >= firstWeek ? prev : null,
     nextWeek: next <= thisWeek ? next : null,
     site,
   });
+  // Last week is not settled: Monday's weekly send writes into it. cache.delete()
+  // would only clear one colo, so the TTL is the invalidation.
+  const settled = weekKey < shiftWeek(thisWeek, -1);
+  return withCache(res, settled ? CACHE_SETTLED : CACHE_FRESH);
+}
+
+async function handleArchiveWeekJson(env, weekKey) {
+  const doc = await readJson(env.DIGEST_ARCHIVE, WEEK + weekKey);
+  const thisWeek = weekKeyOf(todayUTC());
+  if (weekKey > thisWeek || !doc || !Array.isArray(doc.issues) || !doc.issues.length) {
+    return json({ error: "Archive week not found." }, 404);
+  }
+
+  const issues = (
+    await Promise.all(
+      doc.issues.map(async (summary) => {
+        if (!summary || typeof summary.date !== "string" || !isValidDate(summary.date)) return null;
+        const issue = await readJson(env.DIGEST_ARCHIVE, ISSUE + summary.date);
+        if (!issue || !Array.isArray(issue.sections) || !issue.sections.length) return null;
+        return { date: issue.date, subject: issue.subject, sections: issue.sections };
+      })
+    )
+  ).filter(Boolean);
+
+  if (!issues.length) return json({ error: "Archive week not found." }, 404);
+
+  const res = json({ week: weekKey, issues }, 200);
   return withCache(res, weekKey === thisWeek ? CACHE_FRESH : CACHE_SETTLED);
 }
 
@@ -593,6 +725,11 @@ export default {
         slug = decodeURIComponent(pathname.slice("/archive/".length));
       } catch {
         return notFound(site);
+      }
+      if (slug.endsWith(".json")) {
+        const weekKey = slug.slice(0, -".json".length);
+        if (!isValidWeekKey(weekKey)) return json({ error: "Invalid ISO week." }, 400);
+        return cached(request, ctx, () => handleArchiveWeekJson(env, weekKey));
       }
       if (isValidWeekKey(slug)) return cached(request, ctx, () => handleArchiveWeek(env, slug, site));
       if (DATE_RE.test(slug) && isValidDate(slug)) {

@@ -13,7 +13,8 @@
 import worker from "../src/index.js";
 
 export const SEND_TOKEN = "s3cr3t-token";
-export const SEGMENT_ID = "seg-1";
+export const DAILY_SEGMENT_ID = "seg-daily-1";
+export const WEEKLY_SEGMENT_ID = "seg-weekly-1";
 export const ORIGIN = "https://ai-news.nullzwo.dev";
 
 export function makeKv() {
@@ -66,7 +67,15 @@ export function makeKv() {
  * documents; anything else throws, which surfaces as a failing test.
  */
 export function makeResend() {
-  const state = { emails: [], contacts: new Map(), broadcasts: [], fail: null };
+  const state = {
+    emails: [],
+    contacts: new Map(),
+    contactSegments: new Map(),
+    segmentAdds: [],
+    segmentRemovals: [],
+    broadcasts: [],
+    fail: null,
+  };
 
   const ok = (body, status = 200) =>
     new Response(JSON.stringify(body), {
@@ -109,9 +118,37 @@ export function makeResend() {
       if (body.segments && !Array.isArray(body.segments)) {
         throw new Error("POST /contacts: segments must be an array of { id }");
       }
+      if (
+        body.segments &&
+        body.segments.some((segment) => !segment || typeof segment.id !== "string" || !segment.id)
+      ) {
+        throw new Error("POST /contacts: each segment must contain an id");
+      }
       if (state.fail === "contact") return ok({ message: "Rate limited" }, 429);
       state.contacts.set(body.email, { unsubscribed: false });
+      const segments = body.segments || [];
+      const memberships = state.contactSegments.get(body.email) || new Set();
+      for (const segment of segments) memberships.add(segment.id);
+      state.contactSegments.set(body.email, memberships);
+      state.segmentAdds.push({ email: body.email, segments: segments.map(({ id }) => ({ id })) });
       return ok({ id: "contact-1", object: "contact" }, 201);
+    }
+
+    const contactSegmentDelete =
+      /^https:\/\/api\.resend\.com\/contacts\/(.+)\/segments\/(.+)$/.exec(url);
+    if (contactSegmentDelete && method === "DELETE") {
+      if (body !== null) throw new Error("DELETE /contacts/:email/segments/:id: body is not accepted");
+      const email = decodeURIComponent(contactSegmentDelete[1]);
+      const segmentId = decodeURIComponent(contactSegmentDelete[2]);
+      if (!email || !segmentId) throw new Error("DELETE contact segment: email and segment are required");
+      state.segmentRemovals.push({ email, segmentId });
+      // Resend 404s when the contact is not in that segment, which is the
+      // normal case for a first-time subscriber being removed from the other
+      // cadence. Modelling it keeps the caller honest.
+      if (!state.contactSegments.get(email)?.delete(segmentId)) {
+        return ok({ message: "Contact segment not found", name: "not_found" }, 404);
+      }
+      return ok({ object: "contact_segment", id: "contact-segment-1", audienceId: segmentId, deleted: true });
     }
 
     const contactGet = /^https:\/\/api\.resend\.com\/contacts\/(.+)$/.exec(url);
@@ -131,8 +168,9 @@ export function makeResend() {
       globalThis.fetch = (input, opts = {}) => handle(String(input), opts);
     },
     /** Pretend the address is an existing active contact. */
-    seedContact(email, unsubscribed = false) {
+    seedContact(email, unsubscribed = false, segments = []) {
       state.contacts.set(email, { unsubscribed });
+      state.contactSegments.set(email, new Set(segments));
     },
   };
 }
@@ -168,7 +206,8 @@ export function makeEnv(overrides = {}) {
     DIGEST_PENDING: makeKv(),
     DIGEST_ARCHIVE: makeKv(),
     RESEND_API_KEY: "re_test",
-    RESEND_SEGMENT_ID: SEGMENT_ID,
+    DAILY_SEGMENT_ID,
+    WEEKLY_SEGMENT_ID,
     SEND_TOKEN,
     SENDER: "Test <digest@nullzwo.dev>",
     GC_SITE: "ai-news",

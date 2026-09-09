@@ -53,6 +53,63 @@ test("a week page lists that week's issues, newest first", async () => {
   assert.ok(html.includes("10–16 Aug 2026"));
 });
 
+test("a week page places the weekly edition above its day rows", async () => {
+  const { env } = setup();
+  const week = "2026-W33";
+  await env.DIGEST_ARCHIVE.put(
+    `week:${week}`,
+    JSON.stringify({ week, issues: [{ date: "2026-08-13", lead: "A daily lead", items: 1 }] })
+  );
+  await env.DIGEST_ARCHIVE.put(
+    `weekly:${week}`,
+    JSON.stringify({
+      week,
+      subject: "AI news digest - 2026-W33",
+      sections: [{ title: "The week changed the picture", label: "Weekly", items: ["The weekly item."] }],
+    })
+  );
+
+  const res = await get(env, `/archive/${week}`);
+  const html = await res.text();
+
+  assert.equal(res.status, 200);
+  assert.ok(html.includes("Weekly edition"));
+  assert.ok(html.includes("The week changed the picture"));
+  assert.ok(html.indexOf("Weekly edition") < html.indexOf('<span class="d">Date</span>'));
+  assert.ok(html.indexOf("AI news digest - 2026-W33") < html.indexOf("2026-08-13"));
+});
+
+test("the weekly edition is the only thing it adds to a week page", async () => {
+  const { env } = setup();
+  const week = "2026-W33";
+  await env.DIGEST_ARCHIVE.put(
+    `week:${week}`,
+    JSON.stringify({ week, issues: [{ date: TODAY, lead: "Qwen 3.8 is coming open-weights", items: 3 }] })
+  );
+  await env.DIGEST_ARCHIVE.put("meta:first_week", week);
+
+  const before = await (await get(env, `/archive/${week}`)).text();
+
+  await env.DIGEST_ARCHIVE.put(
+    `weekly:${week}`,
+    JSON.stringify({
+      week,
+      subject: "AI news digest - 2026-W33",
+      sections: [{ title: "The week changed the picture", label: "Weekly", items: ["The weekly item."] }],
+    })
+  );
+  const withWeekly = await (await get(env, `/archive/${week}`)).text();
+  assert.notEqual(withWeekly, before);
+
+  // Removing the edition again must restore the page exactly, so the weekly
+  // block is additive and touches nothing a historical week already renders.
+  await env.DIGEST_ARCHIVE.delete(`weekly:${week}`);
+  const after = await (await get(env, `/archive/${week}`)).text();
+
+  assert.equal(after, before, "a week without a weekly edition renders unchanged");
+  assert.ok(!before.includes("Weekly edition"));
+});
+
 test("an empty week renders instead of 404ing", async () => {
   const { env } = setup();
   const res = await get(env, "/archive/2026-W30");
@@ -164,7 +221,11 @@ test("settled pages cache for a day, live pages for a minute", async () => {
   const thisWeek = await get(env, "/archive/2026-W33");
   assert.equal(thisWeek.headers.get("cache-control"), "public, max-age=60");
 
-  const pastWeek = await get(env, "/archive/2026-W32");
+  // Last week stays live: Monday's weekly send still writes into it.
+  const lastWeek = await get(env, "/archive/2026-W32");
+  assert.equal(lastWeek.headers.get("cache-control"), "public, max-age=60");
+
+  const pastWeek = await get(env, "/archive/2026-W31");
   assert.equal(pastWeek.headers.get("cache-control"), "public, max-age=86400");
 
   const today = await get(env, `/archive/${TODAY}`);

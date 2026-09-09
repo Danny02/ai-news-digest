@@ -6,13 +6,15 @@ compatibility_date = "2025-01-01"
 # Deploy with `wrangler pages deploy` from this directory.
 pages_build_output_dir = "static"
 
-# Non-secret site config, threaded into ui.js by the worker. GC_SITE is the
-# GoatCounter site code; SITE_DOMAIN is the canonical host this code base
-# deploys to; SENDER is the RFC-5322 from-address.
+# Non-secret site and audience config. GC_SITE is the GoatCounter site code;
+# SITE_DOMAIN is the canonical host this code base deploys to; SENDER is the
+# RFC-5322 from-address. Segment ids are public Resend audience identifiers.
 [vars]
 GC_SITE = "ai-news"
 SITE_DOMAIN = "ai-news.nullzwo.dev"
 SENDER = "AI News Digest <digest@nullzwo.dev>"
+DAILY_SEGMENT_ID = "d95ca2ac-b89d-4939-b1d0-c8745e139b86"
+WEEKLY_SEGMENT_ID = "a05fac9d-a5e9-4d70-a1fc-62e200038e71"
 
 # Pending double-opt-in tokens, stored in both directions so the subscribe
 # dedupe is a single read: tok:<token> -> email and pend:<email> -> token.
@@ -37,5 +39,4 @@ id = "f79e194f06fa4047bb18c0ea8aed207c"
 
 # Pages secrets (wrangler pages secret put RESEND_API_KEY --project-name ai-news-digest):
 #   RESEND_API_KEY  - Resend sending key
-#   RESEND_SEGMENT_ID - Resend segment (mailing list) to add subscribers to
 #   SEND_TOKEN      - bearer token required by POST /send (daily digest).
