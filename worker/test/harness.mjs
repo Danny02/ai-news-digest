@@ -13,7 +13,8 @@
 import worker from "../src/index.js";
 
 export const SEND_TOKEN = "s3cr3t-token";
-export const SEGMENT_ID = "seg-1";
+export const DAILY_SEGMENT_ID = "seg-daily-1";
+export const WEEKLY_SEGMENT_ID = "seg-weekly-1";
 export const ORIGIN = "https://ai-news.nullzwo.dev";
 
 export function makeKv() {
@@ -168,7 +169,8 @@ export function makeEnv(overrides = {}) {
     DIGEST_PENDING: makeKv(),
     DIGEST_ARCHIVE: makeKv(),
     RESEND_API_KEY: "re_test",
-    RESEND_SEGMENT_ID: SEGMENT_ID,
+    DAILY_SEGMENT_ID,
+    WEEKLY_SEGMENT_ID,
     SEND_TOKEN,
     SENDER: "Test <digest@nullzwo.dev>",
     GC_SITE: "ai-news",

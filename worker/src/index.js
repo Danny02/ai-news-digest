@@ -14,8 +14,8 @@
  * Bindings
  *   KV      DIGEST_PENDING   tok:<token> -> email, pend:<email> -> token (TTL'd)
  *   KV      DIGEST_ARCHIVE   issue:<date>, week:<weekKey>, meta:first_week
- *   secret  RESEND_API_KEY, RESEND_SEGMENT_ID, SEND_TOKEN
- *   var     SENDER, GC_SITE, SITE_DOMAIN (optional)
+ *   secret  RESEND_API_KEY, SEND_TOKEN
+ *   var     DAILY_SEGMENT_ID, WEEKLY_SEGMENT_ID, SENDER, GC_SITE, SITE_DOMAIN (optional)
  *
  * No KV `list()` is used anywhere: every lookup is a direct key read. See
  * `pendingKeys` and the week index for why.
@@ -243,7 +243,7 @@ async function handleSend(request, env) {
   if (!env.SEND_TOKEN || (request.headers.get("authorization") || "") !== expected) {
     return json({ error: "Unauthorized." }, 401);
   }
-  if (!env.RESEND_SEGMENT_ID) {
+  if (!env.DAILY_SEGMENT_ID) {
     return json({ error: "Sending is not configured (no segment)." }, 500);
   }
 
@@ -346,7 +346,7 @@ async function sendBroadcast(env, { subject, html, text }) {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      segment_id: env.RESEND_SEGMENT_ID,
+      segment_id: env.DAILY_SEGMENT_ID,
       from: env.SENDER || "AI News Digest <digest@nullzwo.dev>",
       subject,
       html,
@@ -366,7 +366,7 @@ async function registerContact(env, email) {
       authorization: `Bearer ${env.RESEND_API_KEY}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ email, segments: [{ id: env.RESEND_SEGMENT_ID }] }),
+    body: JSON.stringify({ email, segments: [{ id: env.DAILY_SEGMENT_ID }] }),
   });
   if (!res.ok) throw new Error(`Resend create contact ${res.status}: ${await res.text()}`);
 }

@@ -1,4 +1,8 @@
 # Copy to .dev.vars and fill in real values. Never commit .dev.vars.
 RESEND_API_KEY=
-RESEND_SEGMENT_ID=
 SENDER=AI News Digest <digest@nullzwo.dev>
+
+# Public audience configuration. These values mirror [vars] in wrangler.toml;
+# they are not secrets.
+DAILY_SEGMENT_ID=d95ca2ac-b89d-4939-b1d0-c8745e139b86
+WEEKLY_SEGMENT_ID=a05fac9d-a5e9-4d70-a1fc-62e200038e71

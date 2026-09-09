@@ -7,7 +7,7 @@ import {
   fetchWorker,
   atDate,
   SECTIONS,
-  SEGMENT_ID,
+  DAILY_SEGMENT_ID,
 } from "./harness.mjs";
 
 const TODAY = "2026-08-14";
@@ -38,7 +38,7 @@ test("refuses to send when no send token is configured", async () => {
 });
 
 test("refuses to send when no segment is configured", async () => {
-  const { env } = setup({ RESEND_SEGMENT_ID: "" });
+  const { env } = setup({ DAILY_SEGMENT_ID: "" });
   const res = await send(env, { sections: SECTIONS });
   assert.equal(res.status, 500);
 });
@@ -81,7 +81,7 @@ test("sends a snake_case broadcast to the configured segment", async () => {
   assert.equal(body.broadcastId, "broadcast-1");
 
   const sent = resend.state.broadcasts[0];
-  assert.equal(sent.segment_id, SEGMENT_ID);
+  assert.equal(sent.segment_id, DAILY_SEGMENT_ID);
   assert.equal(sent.send, true);
   assert.ok(!("segmentId" in sent), "camelCase is an SDK spelling the REST API rejects");
   assert.equal(sent.subject, `AI news digest - ${TODAY}`);

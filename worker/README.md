@@ -7,9 +7,11 @@ cd worker
 ./setup.sh
 ```
 
-It walks you through: Resend domain, Resend API key, Resend segment, SENDER,
-deploy, and the `ai-news.nullzwo.dev` custom domain. It writes local values to
-`.dev.vars` and sets project secrets via `wrangler pages secret put`.
+It walks you through: Resend domain, Resend API key, SENDER, deploy, and the
+`ai-news.nullzwo.dev` custom domain. Segment IDs are public configuration in
+`wrangler.toml`; the wizard does not ask for them or store them as secrets. It
+writes local values to `.dev.vars` and sets project secrets via
+`wrangler pages secret put`.
 
 ---
 
@@ -31,8 +33,8 @@ Unsubscribe is handled by Resend's hosted page (add
 
 ## Sending
 
-`POST /send` broadcasts the day's digest to the segment and archives it. It is
-the only writer of the archive, so there is no separate archive token.
+`POST /send` broadcasts the day's digest to `DAILY_SEGMENT_ID` and archives it.
+It is the only writer of the archive, so there is no separate archive token.
 
 ```bash
 curl -X POST https://ai-news.nullzwo.dev/send \
@@ -105,19 +107,33 @@ wrangler kv namespace create --preview DIGEST_PENDING
 ```
 Paste that `preview_id` into `wrangler.toml`.
 
-### 2. Secrets (Pages project — run from the worker dir)
+### 2. Audience configuration
+
+The two Resend audience IDs are public `[vars]` in `wrangler.toml`:
+
+```toml
+DAILY_SEGMENT_ID = "d95ca2ac-b89d-4939-b1d0-c8745e139b86"
+WEEKLY_SEGMENT_ID = "a05fac9d-a5e9-4d70-a1fc-62e200038e71"
+```
+
+The daily send and contact-registration paths use `DAILY_SEGMENT_ID`.
+`WEEKLY_SEGMENT_ID` is available to the worker but is not used by a route yet.
+Do not set either ID as a secret.
+
+### 3. Secrets (Pages project — run from the worker dir)
 ```bash
 wrangler pages secret put RESEND_API_KEY --project-name ai-news-digest        # Resend sending key
-wrangler pages secret put RESEND_SEGMENT_ID --project-name ai-news-digest     # Resend list/segment ID (from Resend dashboard)
 wrangler pages secret put SEND_TOKEN --project-name ai-news-digest            # bearer token required by POST /send
 ```
+
+> the old `RESEND_SEGMENT_ID` secret may only be deleted AFTER the deployment that reads the config value is live. Both may coexist in between; the code path is the same either way.
 
 SENDER is NOT a secret — it's a non-secret `[vars]` entry in `wrangler.toml`
 (deployed with the config; fallback `AI News Digest <digest@nullzwo.dev>` in
 code). Do not set it as a secret — a Pages secret of the same name would
 shadow the var.
 
-### 3. Custom domain
+### 4. Custom domain
 `ai-news.nullzwo.dev` is declarative in `wrangler.toml` (`routes` with
 `custom_domain = true`), so every `wrangler deploy` attaches it automatically.
 Requires the `nullzwo.dev` zone to be active in the same Cloudflare account.
@@ -133,7 +149,9 @@ cd worker
 cp .dev.vars.example .dev.vars   # fill in real values (NOT committed)
 npm run dev                      # wrangler dev
 ```
-`.dev.vars` holds `RESEND_API_KEY`, `RESEND_SEGMENT_ID`, `SENDER`.
+`.dev.vars` holds `RESEND_API_KEY` and `SENDER`. `DAILY_SEGMENT_ID` and
+`WEEKLY_SEGMENT_ID` are public config values from `[vars]` in `wrangler.toml`;
+they are also listed in `.dev.vars.example` for local overrides.
 
 ## Deploy
 ```bash
@@ -141,8 +159,8 @@ cd worker
 npm run deploy
 ```
 
-## Getting the Resend list/segment ID
-In the Resend dashboard, Audiences/Segments → create or open your segment →
-its ID is in the URL or the segment detail. Sending to the whole list is then
-a Resend Broadcast to that segment (the daily digest loop switches from the
-two hardcoded addresses to a Broadcast on that segment).
+## Audience configuration
+The daily and weekly Resend audience IDs are checked into the `[vars]` block in
+`wrangler.toml` because they are public identifiers, not credentials. Update
+that block when an audience changes; do not move either value into Pages
+secrets.
