@@ -8,6 +8,7 @@
  *   POST /send                 broadcast today's digest, archive it (bearer auth)
  *   GET  /archive              302 to the current week
  *   GET  /archive/GGGG-Www     one week of issues
+ *   GET  /archive/GGGG-Www.json one week of issues as JSON
  *   GET  /archive/YYYY-MM-DD   one issue
  *   GET  /bg.jpg               inlined background image
  *
@@ -453,6 +454,30 @@ async function handleArchiveWeek(env, weekKey, site) {
   return withCache(res, weekKey === thisWeek ? CACHE_FRESH : CACHE_SETTLED);
 }
 
+async function handleArchiveWeekJson(env, weekKey) {
+  const doc = await readJson(env.DIGEST_ARCHIVE, WEEK + weekKey);
+  const thisWeek = weekKeyOf(todayUTC());
+  if (weekKey > thisWeek || !doc || !Array.isArray(doc.issues) || !doc.issues.length) {
+    return json({ error: "Archive week not found." }, 404);
+  }
+
+  const issues = (
+    await Promise.all(
+      doc.issues.map(async (summary) => {
+        if (!summary || typeof summary.date !== "string" || !isValidDate(summary.date)) return null;
+        const issue = await readJson(env.DIGEST_ARCHIVE, ISSUE + summary.date);
+        if (!issue || !Array.isArray(issue.sections) || !issue.sections.length) return null;
+        return { date: issue.date, subject: issue.subject, sections: issue.sections };
+      })
+    )
+  ).filter(Boolean);
+
+  if (!issues.length) return json({ error: "Archive week not found." }, 404);
+
+  const res = json({ week: weekKey, issues }, 200);
+  return withCache(res, weekKey === thisWeek ? CACHE_FRESH : CACHE_SETTLED);
+}
+
 async function handleArchiveIssue(env, date, site) {
   const doc = await readJson(env.DIGEST_ARCHIVE, ISSUE + date);
   // `status: "sending"` is a reservation, not a published issue.
@@ -593,6 +618,11 @@ export default {
         slug = decodeURIComponent(pathname.slice("/archive/".length));
       } catch {
         return notFound(site);
+      }
+      if (slug.endsWith(".json")) {
+        const weekKey = slug.slice(0, -".json".length);
+        if (!isValidWeekKey(weekKey)) return json({ error: "Invalid ISO week." }, 400);
+        return cached(request, ctx, () => handleArchiveWeekJson(env, weekKey));
       }
       if (isValidWeekKey(slug)) return cached(request, ctx, () => handleArchiveWeek(env, slug, site));
       if (DATE_RE.test(slug) && isValidDate(slug)) {
