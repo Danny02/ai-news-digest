@@ -34,11 +34,14 @@ cron_setup() {
 }
 
 cron_acquire_lock() {
-  # Overlap guard: skip if a run started <3h ago is still going (daily cron
-  # cannot overlap in practice, but a manual run can).
+  # The optional age keeps the daily caller's 3h default unchanged while
+  # allowing longer-running callers to choose their own staleness window.
+  local stale_after="${1:-10800}"
+  # Overlap guard: skip if a run started within the configured window is
+  # still going (cron cannot overlap in practice, but a manual run can).
   if [ -f "$LOCK" ]; then
     AGE=$(( $(date +%s) - $(stat -f %m "$LOCK") ))
-    if [ "$AGE" -lt 10800 ]; then
+    if [ "$AGE" -lt "$stale_after" ]; then
       log "skipping: another run active (lock age ${AGE}s)"
       return 1
     fi
