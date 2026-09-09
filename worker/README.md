@@ -33,22 +33,29 @@ Unsubscribe is handled by Resend's hosted page (add
 
 ## Sending
 
-`POST /send` broadcasts the day's digest to `DAILY_SEGMENT_ID` and archives it.
+`POST /send` broadcasts the daily digest to `DAILY_SEGMENT_ID` by default. Pass
+`"cadence":"weekly"` to broadcast the previous completed ISO week to
+`WEEKLY_SEGMENT_ID` instead. The endpoint derives the period from the current
+UTC date; the caller cannot pass a date or week.
+
 It is the only writer of the archive, so there is no separate archive token.
 
 ```bash
 curl -X POST https://ai-news.nullzwo.dev/send \
   -H "authorization: Bearer $SEND_TOKEN" \
   -H "content-type: application/json" \
-  -d '{"subject":"optional","sections":[{"title":"…","label":"Models","items":["markdown"]}]}'
+  -d '{"cadence":"weekly","subject":"optional","sections":[{"title":"…","label":"Models","items":["markdown"]}]}'
 ```
 
-- **No `date` field.** The issue is always dated UTC today; passing `date` is a
-  400. Backfilling would mean emailing something the archive contradicts.
-- **One issue per day.** The archive key is reserved before the broadcast, so a
-  retry or a double-fire gets `409` instead of mailing the list twice. KV is
+- **No `date` or `week` field.** A daily issue uses UTC today. A weekly issue
+  uses the previous completed ISO week. Passing either field is a `400`.
+- **One archive key per edition.** The daily issue uses `issue:<YYYY-MM-DD>`.
+  The weekly edition uses `weekly:<GGGG-Www>`. Each key is reserved before the
+  broadcast, so a retry gets `409` instead of mailing the list twice. KV is
   eventually consistent, so this stops retries, not two simultaneous callers.
-- A Resend rejection returns `502` and releases the day for a retry.
+- A weekly send with no issues in its source week returns success without mail
+  or an archive write.
+- A Resend rejection returns `502` and releases the edition for a retry.
 
 ## Archive
 
@@ -58,7 +65,8 @@ re-publishing anything.
 
 ```
 issue:<YYYY-MM-DD>   { date, subject, sections }
-week:<GGGG-Www>      { week, issues: [{ date, lead, items }] }   # ISO week
+week:<GGGG-Www>     { week, issues: [{ date, lead, items }] }   # daily index
+weekly:<GGGG-Www>  { week, subject, sections }                  # weekly issue
 meta:first_week      earliest week key ever published
 ```
 
@@ -70,7 +78,7 @@ page needs to know what else exists.
 | Route | Purpose |
 |---|---|
 | `GET /archive` | 302 to the current week (`no-store`) |
-| `GET /archive/<GGGG-Www>` | one week of issues, newest first |
+| `GET /archive/<GGGG-Www>` | weekly edition, then daily issues newest first |
 | `GET /archive/<YYYY-MM-DD>` | one issue |
 
 **There is no `list()` call in the worker.** Every lookup — pending tokens,
@@ -117,8 +125,7 @@ WEEKLY_SEGMENT_ID = "a05fac9d-a5e9-4d70-a1fc-62e200038e71"
 ```
 
 The daily send and contact-registration paths use `DAILY_SEGMENT_ID`.
-`WEEKLY_SEGMENT_ID` is available to the worker but is not used by a route yet.
-Do not set either ID as a secret.
+`WEEKLY_SEGMENT_ID` is used by weekly sends. Do not set either ID as a secret.
 
 ### 3. Secrets (Pages project — run from the worker dir)
 ```bash

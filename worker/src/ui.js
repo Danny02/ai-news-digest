@@ -352,11 +352,24 @@ export function notFound(site = {}) {
   });
 }
 
+/** Render the shared section shape used by daily and weekly archive entries. */
+function renderThemes(sections) {
+  return sections
+    .map(
+      (s) =>
+        `<section class="theme"><span class="chip">${escapeHtml((s.label || "Digest").toUpperCase())}</span>` +
+        `<h2>${escapeHtml(s.title)}</h2><ul>` +
+        (Array.isArray(s.items) ? s.items.map((it) => `<li>${renderInline(it, WEB)}</li>`).join("") : "") +
+        `</ul></section>`
+    )
+    .join("");
+}
+
 /**
  * One week of issues. `prevWeek`/`nextWeek` are week keys or null; the caller
  * computes them arithmetically, so rendering never needs to know what exists.
  */
-export function archiveWeekPage({ weekKey, issues, prevWeek, nextWeek, site = {} }) {
+export function archiveWeekPage({ weekKey, issues, weekly = null, prevWeek, nextWeek, site = {} }) {
   const rows = issues.length
     ? issues
         .map(
@@ -369,6 +382,14 @@ export function archiveWeekPage({ weekKey, issues, prevWeek, nextWeek, site = {}
         .join("")
     : `<p class="empty">No issues that week.</p>`;
 
+  const weeklyBlock =
+    weekly && Array.isArray(weekly.sections) && weekly.sections.length
+      ? `<div class="issue weekly-edition"><section class="theme"><span class="chip">Weekly edition</span>` +
+        `<h2>${escapeHtml(weekly.subject || `AI news digest - ${weekKey}`)}</h2></section>` +
+        renderThemes(weekly.sections) +
+        `</div>`
+      : "";
+
   const nav =
     `<nav class="pager">` +
     (prevWeek ? `<a href="/archive/${prevWeek}">&larr; ${weekLabel(prevWeek)}</a>` : `<span></span>`) +
@@ -378,7 +399,7 @@ export function archiveWeekPage({ weekKey, issues, prevWeek, nextWeek, site = {}
   const main = `<div class="doc">
 <span class="kicker">Archive &middot; ${escapeHtml(weekKey)}</span>
 <h1><span class="a">Every issue we sent.</span><span class="b">Nothing held back.</span></h1>
-<p class="lead">${weekLabel(weekKey)}. Each issue is what survived that day&rsquo;s filter.</p>
+<p class="lead">${weekLabel(weekKey)}. Each issue is what survived that day&rsquo;s filter.</p>${weeklyBlock}
 <div class="rows"><div class="rowhead"><span class="d">Date</span><span class="t">Lead theme</span><span class="n">Items</span></div>${rows}</div>
 ${nav}
 <a class="action" href="/">Subscribe</a>
@@ -388,15 +409,7 @@ ${nav}
 
 /** A single issue. `prev`/`next` are dates within the same week, or null. */
 export function archiveIssuePage({ date, sections, weekKey, prev, next, site = {} }) {
-  const body = sections
-    .map(
-      (s) =>
-        `<section class="theme"><span class="chip">${escapeHtml((s.label || "Digest").toUpperCase())}</span>` +
-        `<h2>${escapeHtml(s.title)}</h2><ul>` +
-        (Array.isArray(s.items) ? s.items.map((it) => `<li>${renderInline(it, WEB)}</li>`).join("") : "") +
-        `</ul></section>`
-    )
-    .join("");
+  const body = renderThemes(sections);
 
   const nav =
     `<nav class="pager">` +
