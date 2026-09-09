@@ -247,6 +247,31 @@ test("an unknown or missing token is a friendly page, not an error", async () =>
   assert.ok((await missing.text()).includes("Half a link"));
 });
 
+test("a switch that fails half way leaves the reader in neither cadence", async () => {
+  const { env, resend } = setup();
+  resend.seedContact("reader@example.com", false, [DAILY_SEGMENT_ID]);
+  await subscribe(env, "reader@example.com", "weekly");
+  const token = tokenFrom(resend);
+
+  resend.state.fail = "contact";
+  const res = await fetchWorker("GET", `/confirm?token=${token}`, {}, env);
+
+  assert.equal(res.status, 500);
+  assert.deepEqual(
+    resend.state.contactSegments.get("reader@example.com"),
+    new Set(),
+    "two mails on a Monday is worse than none: never hold both segments"
+  );
+
+  resend.state.fail = null;
+  const retry = await fetchWorker("GET", `/confirm?token=${token}`, {}, env);
+  assert.ok((await retry.text()).includes("Subscription confirmed"));
+  assert.deepEqual(
+    resend.state.contactSegments.get("reader@example.com"),
+    new Set([WEEKLY_SEGMENT_ID])
+  );
+});
+
 test("a failed registration keeps the token usable", async () => {
   const { env, resend } = setup();
   await subscribe(env, "reader@example.com");

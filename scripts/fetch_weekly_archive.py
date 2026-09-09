@@ -25,6 +25,15 @@ ARCHIVE_API_URL = os.environ.get("ARCHIVE_API_URL", "https://ai-news.nullzwo.dev
 OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
+def skip_week(week: str, artifact) -> int:
+    """Record an empty week as done so no later stage produces a draft or mail."""
+    write_artifact(artifact, {"week": week, "issues": [], "skipped": True})
+    for stage in ("fetch", "condense", "send"):
+        digest_state.mark(stage, "ok", week)
+    print(f"[fetch] no archived issues for {week}; skipping weekly edition")
+    return 0
+
+
 def artifact_ready(path, week: str) -> bool:
     if not path.exists():
         return False
@@ -47,6 +56,9 @@ def main() -> int:
     artifact = archive_path(week)
 
     if digest_state.is_ok("fetch", week) and artifact_ready(artifact, week):
+        if not json.loads(artifact.read_text())["issues"]:
+            print(f"[fetch] no archived issues for {week}; skipping weekly edition")
+            return 0
         print(f"[savepoint] fetch already ok for {week} — using {artifact}")
         return 0
 
@@ -61,13 +73,9 @@ def main() -> int:
         if not isinstance(value.get("issues"), list):
             raise ValueError("archive response has no issues list")
     except urllib.error.HTTPError as exc:
+        # The worker uses 404 for a missing or empty week.
         if exc.code == 404:
-            # The worker uses 404 for a missing or empty week. Keep a local
-            # sentinel so a rerun can skip without asking the endpoint again.
-            write_artifact(artifact, {"week": week, "issues": [], "skipped": True})
-            digest_state.mark("fetch", "ok", week)
-            print(f"[fetch] no archived issues for {week}; skipping weekly edition")
-            return 0
+            return skip_week(week, artifact)
         digest_state.mark("fetch", "failed", week)
         print(f"[fetch] archive returned HTTP {exc.code}", file=sys.stderr)
         return 1
@@ -75,6 +83,9 @@ def main() -> int:
         digest_state.mark("fetch", "failed", week)
         print(f"[fetch] error: {exc}", file=sys.stderr)
         return 1
+
+    if not value["issues"]:
+        return skip_week(week, artifact)
 
     write_artifact(artifact, value)
     digest_state.mark("fetch", "ok", week)

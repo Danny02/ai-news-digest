@@ -365,7 +365,6 @@ export function notFound(site = {}) {
   });
 }
 
-/** Render the shared section shape used by daily and weekly archive entries. */
 function renderThemes(sections) {
   return sections
     .map(

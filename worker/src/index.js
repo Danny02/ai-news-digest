@@ -41,6 +41,11 @@ const EMAIL_MAX = 254; // RFC 5321 address limit; also bounds the KV key
 const SEND_RESERVATION_TTL = 300; // seconds a crashed /send can block the day
 const VALID_CADENCES = new Set(["daily", "weekly"]);
 
+// A cadence is exclusive: every reader is in one segment and not the other.
+const segmentFor = (env, cadence) =>
+  cadence === "weekly" ? env.WEEKLY_SEGMENT_ID : env.DAILY_SEGMENT_ID;
+const other = (cadence) => (cadence === "weekly" ? "daily" : "weekly");
+
 const ISSUE = "issue:";
 const WEEK = "week:";
 const WEEKLY = "weekly:";
@@ -206,8 +211,12 @@ async function handleConfirm(request, env, url, site) {
 
   const { email, cadence } = pending;
   try {
+    // Remove first. If the add fails afterwards the reader is in neither
+    // segment and the token still works, so a retry fixes it. Adding first
+    // would leave them in both on a failed removal, which is two mails on a
+    // Monday — the exact thing the cadence choice exists to prevent.
+    await removeContact(env, email, segmentFor(env, other(cadence)));
     await registerContact(env, email, cadence);
-    await removeContact(env, email, cadence === "weekly" ? env.DAILY_SEGMENT_ID : env.WEEKLY_SEGMENT_ID);
   } catch (err) {
     console.error("register failed", err);
     return statusPage({
@@ -296,7 +305,7 @@ async function handleSend(request, env) {
   if (cadence !== "daily" && cadence !== "weekly") {
     return json({ error: "cadence must be daily or weekly." }, 400);
   }
-  const segment = cadence === "weekly" ? env.WEEKLY_SEGMENT_ID : env.DAILY_SEGMENT_ID;
+  const segment = segmentFor(env, cadence);
   if (!segment) {
     return json({ error: "Sending is not configured (no segment)." }, 500);
   }
@@ -412,7 +421,7 @@ async function readJson(kv, key) {
  * Success is 201.
  */
 async function sendBroadcast(env, { cadence = "daily", subject, html, text }) {
-  const segmentId = cadence === "weekly" ? env.WEEKLY_SEGMENT_ID : env.DAILY_SEGMENT_ID;
+  const segmentId = segmentFor(env, cadence);
   const res = await fetch("https://api.resend.com/broadcasts", {
     method: "POST",
     headers: {
@@ -434,7 +443,7 @@ async function sendBroadcast(env, { cadence = "daily", subject, html, text }) {
 }
 
 async function registerContact(env, email, cadence) {
-  const segmentId = cadence === "weekly" ? env.WEEKLY_SEGMENT_ID : env.DAILY_SEGMENT_ID;
+  const segmentId = segmentFor(env, cadence);
   const res = await fetch("https://api.resend.com/contacts", {
     method: "POST",
     headers: {

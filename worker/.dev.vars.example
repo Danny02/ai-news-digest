@@ -2,5 +2,6 @@
 RESEND_API_KEY=
 SENDER=AI News Digest <digest@nullzwo.dev>
 
-# The segment ids are not secrets. wrangler dev reads them from [vars] in
-# wrangler.toml; repeating them here would shadow that and go stale.
+# DAILY_SEGMENT_ID and WEEKLY_SEGMENT_ID are not secrets. wrangler dev reads
+# them from [vars] in wrangler.toml; repeating them here would shadow that
+# value and go stale.
