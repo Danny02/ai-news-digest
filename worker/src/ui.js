@@ -54,7 +54,7 @@ function shell(main, title, status = 200, extraScript = "", bodyClass = "", site
       `<div class="stream" aria-hidden="true"><div class="streamIn"><div class="track" id="track"></div></div></div>` +
       `<div class="crt" aria-hidden="true"></div>` +
       `<div class="bar"><a class="mark" href="/"><b>AI News Digest</b></a>` +
-      `<span><a href="/archive">Archive</a> &middot; Sent daily</span></div>` +
+      `<span><a href="/archive">Archive</a> &middot; Every weekday or Monday</span></div>` +
       `<main>${main}</main>` +
       `<footer><span>${addr}</span><span>No sponsors</span>` +
       `<span>No tracking pixels</span>` +
@@ -198,7 +198,14 @@ h1 .b{display:block;color:var(--ink)}
 .lead{margin:32px 0 0;max-width:46ch;font-size:clamp(16px,1.5vw,19px);line-height:1.55;color:var(--dim)}
 .lead b{color:var(--ink);font-weight:600}
 
-form{margin:40px 0 0;display:flex;align-items:stretch;gap:14px;max-width:520px}
+form{margin:40px 0 0;max-width:520px}
+.cadence{border:0;display:grid;gap:9px;margin:0 0 22px;padding:0;color:var(--dim);
+font:400 13px/1.4 var(--sans)}
+.cadence legend{margin-bottom:8px;color:var(--ink);font:600 11px/1 var(--sans);
+letter-spacing:.14em;text-transform:uppercase}
+.cadence label{display:flex;align-items:baseline;gap:8px;cursor:pointer}
+.cadence input{width:auto;margin:0;padding:0;accent-color:var(--ink)}
+.signup{display:flex;align-items:stretch;gap:14px}
 .field{flex:1;min-width:0;display:flex;align-items:center;border-bottom:1.5px solid var(--faint);
 transition:border-color .2s}
 .field:focus-within{border-color:var(--ink)}
@@ -247,7 +254,7 @@ footer button:hover{color:var(--ink)}
 main{padding:16px 20px 32px}
 footer{padding:18px 20px}
 h1{letter-spacing:-.04em}
-form{flex-direction:column;gap:20px;align-items:stretch}
+.signup{flex-direction:column;gap:20px;align-items:stretch}
 button[type=submit],.action{width:100%;text-align:center}
 .plate{background:radial-gradient(112% 60% at 50% 52%,var(--bg) 0 40%,transparent 88%),
 linear-gradient(var(--veil),var(--veil))}}
@@ -305,10 +312,15 @@ function baseScript() {
 export function landingPage(site = {}) {
   const main = `<div class="hero">
 <h1><span class="a">Most AI news is noise.</span><span class="b">We send the rest.</span></h1>
-<p class="lead">One email a day on coding agents, open weights and harness engineering &mdash; held to one bar: <b>could this change how you work?</b></p>
+<p class="lead">Every weekday, or one mail on Monday covering the week. Coding agents, open weights and harness engineering &mdash; held to one bar: <b>could this change how you work?</b></p>
 <form id="f" action="/subscribe" method="post" novalidate>
-<span class="field"><input id="email" name="email" type="email" placeholder="you@example.com" autocomplete="email" aria-label="Email address"></span>
-<button type="submit">Subscribe</button>
+<fieldset class="cadence">
+<legend>How often should we write?</legend>
+<label><input type="radio" name="cadence" value="daily" checked> <span>Every weekday</span></label>
+<label><input type="radio" name="cadence" value="weekly"> <span>One mail on Monday covering the week</span></label>
+</fieldset>
+<div class="signup"><span class="field"><input id="email" name="email" type="email" placeholder="you@example.com" autocomplete="email" aria-label="Email address"></span>
+<button type="submit">Subscribe</button></div>
 </form>
 <p class="meta"><span>Yesterday: 412 in, 6 out</span><span>Double opt-in</span><span>One click to leave</span></p>
 <p class="msg" id="msg" role="status" aria-live="polite"></p>
@@ -316,10 +328,11 @@ export function landingPage(site = {}) {
   const script =
     `var f=document.getElementById('f'),m=document.getElementById('msg');` +
     `f.addEventListener('submit',function(e){e.preventDefault();` +
-    `var email=f.email.value.trim();m.className='msg';m.textContent='';` +
+    `var email=f.email.value.trim(),cadence=f.querySelector('input[name="cadence"]:checked').value;` +
+    `m.className='msg';m.textContent='';` +
     `if(\!email){m.className='msg err';m.textContent='Enter an email address.';return}` +
     `fetch('/subscribe',{method:'POST',headers:{'content-type':'application/json'},` +
-    `body:JSON.stringify({email:email})}).then(function(r){` +
+    `body:JSON.stringify({email:email,cadence:cadence})}).then(function(r){` +
     `return r.json().then(function(d){return{ok:r.ok,d:d}})}).then(function(x){` +
     `if(\!x.ok){m.className='msg err';m.textContent=x.d.error||'Something went wrong.';return}` +
     `m.className='msg ok';m.textContent='Confirmation link sent. Check your inbox.';f.email.value=''` +

@@ -13,7 +13,7 @@
  *   GET  /bg.jpg               inlined background image
  *
  * Bindings
- *   KV      DIGEST_PENDING   tok:<token> -> email, pend:<email> -> token (TTL'd)
+ *   KV      DIGEST_PENDING   tok:<token> -> {email,cadence}, pend:<email> -> token (TTL'd)
  *   KV      DIGEST_ARCHIVE   issue:<date>, week:<weekKey>, meta:first_week
  *   secret  RESEND_API_KEY, SEND_TOKEN
  *   var     DAILY_SEGMENT_ID, WEEKLY_SEGMENT_ID, SENDER, GC_SITE, SITE_DOMAIN (optional)
@@ -39,6 +39,7 @@ const TTL_SECONDS = 7 * 24 * 60 * 60; // pending token validity: 7 days
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const EMAIL_MAX = 254; // RFC 5321 address limit; also bounds the KV key
 const SEND_RESERVATION_TTL = 300; // seconds a crashed /send can block the day
+const VALID_CADENCES = new Set(["daily", "weekly"]);
 
 const ISSUE = "issue:";
 const WEEK = "week:";
@@ -58,8 +59,8 @@ function json(res, status) {
 //
 // Two keys per pending subscription, written and expired together:
 //
-//   tok:<token>   -> email   read by /confirm
-//   pend:<email>  -> token   read by /subscribe to dedupe
+//   tok:<token>   -> { email, cadence }   read by /confirm
+//   pend:<email>  -> token               read by /subscribe to dedupe
 //
 // The reverse key is what makes the dedupe O(1). The previous version listed
 // the whole namespace and read every value on every request, which capped out
@@ -70,6 +71,26 @@ const pendingKeys = {
   email: (email) => `pend:${email}`,
 };
 
+function pendingSubscription(value) {
+  if (typeof value !== "string") return null;
+
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed.email === "string" && parsed.email) {
+      return {
+        email: parsed.email,
+        cadence: VALID_CADENCES.has(parsed.cadence) ? parsed.cadence : "daily",
+        legacy: false,
+      };
+    }
+  } catch {
+    // Before cadence support, the token key held the bare email string.
+  }
+
+  if (EMAIL_RE.test(value)) return { email: value, cadence: "daily", legacy: true };
+  return null;
+}
+
 async function handleSubscribe(request, env) {
   let body;
   try {
@@ -77,32 +98,51 @@ async function handleSubscribe(request, env) {
   } catch {
     return json({ error: "Invalid JSON body." }, 400);
   }
-  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+  const cadenceProvided =
+    body && typeof body === "object" && Object.prototype.hasOwnProperty.call(body, "cadence");
+  const cadence = cadenceProvided ? body.cadence : "daily";
   if (!EMAIL_RE.test(email) || email.length > EMAIL_MAX) {
     return json({ error: "Enter a valid email address." }, 400);
   }
+  if (!VALID_CADENCES.has(cadence)) {
+    return json({ error: "Cadence must be daily or weekly." }, 400);
+  }
 
-  // Already on the list: report success without sending anything. The response
-  // must not tell the caller whether an address is subscribed.
-  if (await isAlreadySubscribed(env, email)) {
+  // An old caller that sends only an email keeps the existing idempotent
+  // behaviour. An explicit cadence is a deliberate re-subscription, which
+  // allows a confirmed contact to switch after double opt-in.
+  if (!cadenceProvided && (await isAlreadySubscribed(env, email))) {
     return json({ ok: true, detail: "confirmation_sent" }, 200);
   }
 
   // A pending token already exists: resend it rather than minting a second one,
-  // so the earlier email in the inbox keeps working.
+  // so the earlier email in the inbox keeps working. New-format pending
+  // subscriptions follow the latest explicit choice; legacy bare strings stay
+  // daily because their link was issued before cadence support.
   const existing = await env.DIGEST_PENDING.get(pendingKeys.email(email));
   if (existing) {
-    await sendConfirmEmail(env, request, email, existing);
+    const stored = pendingSubscription(await env.DIGEST_PENDING.get(pendingKeys.token(existing)));
+    let selected = stored?.cadence || cadence;
+    if (stored && !stored.legacy && stored.email === email && stored.cadence !== cadence) {
+      selected = cadence;
+      const opts = { expirationTtl: TTL_SECONDS };
+      await Promise.all([
+        env.DIGEST_PENDING.put(pendingKeys.token(existing), JSON.stringify({ email, cadence }), opts),
+        env.DIGEST_PENDING.put(pendingKeys.email(email), existing, opts),
+      ]);
+    }
+    await sendConfirmEmail(env, request, email, existing, selected);
     return json({ ok: true, detail: "confirmation_resent" }, 200);
   }
 
   const token = randomToken();
   const opts = { expirationTtl: TTL_SECONDS };
   await Promise.all([
-    env.DIGEST_PENDING.put(pendingKeys.token(token), email, opts),
+    env.DIGEST_PENDING.put(pendingKeys.token(token), JSON.stringify({ email, cadence }), opts),
     env.DIGEST_PENDING.put(pendingKeys.email(email), token, opts),
   ]);
-  await sendConfirmEmail(env, request, email, token);
+  await sendConfirmEmail(env, request, email, token, cadence);
   return json({ ok: true, detail: "confirmation_sent" }, 200);
 }
 
@@ -147,8 +187,8 @@ async function handleConfirm(request, env, url, site) {
     });
   }
 
-  const email = await env.DIGEST_PENDING.get(pendingKeys.token(token));
-  if (!email) {
+  const pending = pendingSubscription(await env.DIGEST_PENDING.get(pendingKeys.token(token)));
+  if (!pending) {
     return statusPage({
       kicker: "Link expired",
       a: "That link is spent.",
@@ -163,8 +203,10 @@ async function handleConfirm(request, env, url, site) {
     });
   }
 
+  const { email, cadence } = pending;
   try {
-    await registerContact(env, email);
+    await registerContact(env, email, cadence);
+    await removeContact(env, email, cadence === "weekly" ? env.DAILY_SEGMENT_ID : env.WEEKLY_SEGMENT_ID);
   } catch (err) {
     console.error("register failed", err);
     return statusPage({
@@ -191,11 +233,13 @@ async function handleConfirm(request, env, url, site) {
   return statusPage({
     kicker: "Subscription confirmed",
     a: "You cleared the bar.",
-    b: "First issue tomorrow.",
+    b: cadence === "weekly" ? "First mail Monday." : "First issue tomorrow.",
     receipt: escapeHtml(email),
     chip: "PASS",
     spec: [
-      "<b>Daily</b>, one email. Nothing else.",
+      cadence === "weekly"
+        ? "<b>One mail on Monday covering the week.</b> Nothing else."
+        : "<b>Every weekday.</b> One email. Nothing else.",
       "<b>~500 words</b>, five themes, under a minute to scan.",
       "<b>One click</b> in any issue takes you off the list.",
     ],
@@ -360,31 +404,46 @@ async function sendBroadcast(env, { subject, html, text }) {
   return data && data.id;
 }
 
-async function registerContact(env, email) {
+async function registerContact(env, email, cadence) {
+  const segmentId = cadence === "weekly" ? env.WEEKLY_SEGMENT_ID : env.DAILY_SEGMENT_ID;
   const res = await fetch("https://api.resend.com/contacts", {
     method: "POST",
     headers: {
       authorization: `Bearer ${env.RESEND_API_KEY}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ email, segments: [{ id: env.DAILY_SEGMENT_ID }] }),
+    body: JSON.stringify({ email, segments: [{ id: segmentId }] }),
   });
   if (!res.ok) throw new Error(`Resend create contact ${res.status}: ${await res.text()}`);
 }
 
-async function sendConfirmEmail(env, request, email, token) {
+async function removeContact(env, email, segmentId) {
+  const res = await fetch(
+    `https://api.resend.com/contacts/${encodeURIComponent(email)}/segments/${encodeURIComponent(segmentId)}`,
+    {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${env.RESEND_API_KEY}` },
+    }
+  );
+  if (!res.ok) throw new Error(`Resend remove contact segment ${res.status}: ${await res.text()}`);
+}
+
+async function sendConfirmEmail(env, request, email, token, cadence) {
   const origin = env.SITE_DOMAIN ? `https://${env.SITE_DOMAIN}` : new URL(request.url).origin;
   const link = `${origin}/confirm?token=${encodeURIComponent(token)}`;
   const fromIdent = env.SENDER || "AI News Digest <digest@nullzwo.dev>";
   const fromAddr = (fromIdent.match(/<([^<>]+)>/) || [])[1] || fromIdent;
   const sans = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
   const mono = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
+  const cadenceText = cadence === "weekly" ? "one mail on Monday covering the week" : "every weekday";
+  const cadenceHtml = cadence === "weekly" ? "one mail on Monday covering the week" : "every weekday";
   const htmlBody = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#000000;margin:0;padding:0">
 <tr><td align="center" style="padding:40px 20px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px">
 <tr><td style="font-family:${sans};font-size:11px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:#7a7a7a;padding-bottom:26px">AI News Digest</td></tr>
 <tr><td style="font-family:${sans};font-size:34px;line-height:1.05;letter-spacing:-.035em;font-weight:800;color:#7a7a7a">One click left.<br><span style="color:#ffffff">Then you're on.</span></td></tr>
 <tr><td style="font-family:${sans};font-size:15px;line-height:1.55;color:#b8b8b8;padding-top:22px">Confirm this address to start receiving the digest. If you did not ask for it, ignore this email and nothing happens.</td></tr>
+<tr><td style="font-family:${sans};font-size:15px;line-height:1.55;color:#ffffff;padding-top:18px">Your choice: ${cadenceHtml}.</td></tr>
 <tr><td style="padding-top:30px">
 <table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="background:#ffffff">
 <a href="${link}" style="display:inline-block;padding:15px 28px;font-family:${sans};font-size:13px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#000000;text-decoration:none">Confirm subscription</a>
@@ -398,6 +457,7 @@ async function sendConfirmEmail(env, request, email, token) {
     "AI News Digest",
     "",
     "Confirm this address to start receiving the digest:",
+    `Your choice: ${cadenceText}.`,
     link,
     "",
     "The link is valid for 7 days and works once.",
