@@ -12,50 +12,24 @@
 #   logs/YYYY-MM-DD.jsonl     pi session transcript (JSONL, --mode json)
 #   logs/YYYY-MM-DD.err.log   stderr + status lines
 #
-# Full pi path so cron's minimal PATH cannot break the call; export a
-# reasonable PATH for the python/node helpers the session spawns.
 set -uo pipefail
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$REPO" || exit 1
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-
-# Pin the provider on the CLI (flags beat settings.json defaults). Env vars
-# like PI_PROVIDER are ignored by pi 0.84.2. claude-bridge rides the local
-# Claude CLI subscription, so it needs no auth.json key.
-PROVIDER=claude-bridge
-MODEL=claude-sonnet-5
-THINKING=medium
-
-# Load secrets from repo-root .env if present (never echoed).
-if [ -f .env ]; then
-  set -a; . ./.env; set +a
-fi
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "$0")" && pwd)/cron_lib.sh"
 
 DAY="$(date +%F)"
 JSONL="logs/$DAY.jsonl"
 ERRL="logs/$DAY.err.log"
-mkdir -p logs
-log() { echo "[digest] $(date -u) $*" >> "$ERRL"; }
-
-# Overlap guard: skip if a run started <3h ago is still going (daily cron
-# cannot overlap in practice, but a manual run can).
-LOCK="logs/.digest.lock"
-if [ -f "$LOCK" ]; then
-  AGE=$(( $(date +%s) - $(stat -f %m "$LOCK") ))
-  if [ "$AGE" -lt 10800 ]; then
-    log "skipping: another run active (lock age ${AGE}s)"
-    exit 0
-  fi
-  log "removing stale lock (age ${AGE}s)"
-  rm -f "$LOCK"
-fi
-echo "$$" > "$LOCK"
-trap 'rm -f "$LOCK"' EXIT
 
 # PROMPT_FILE override for manual tests; default is the cron variant of the
 # daily loop prompt (no loop re-arm step).
 PROMPT_FILE="${PROMPT_FILE:-prompts/daily-loop-cron.md}"
+LOCK="logs/.digest.lock"
+
+cron_setup "$LOCK" "$PROMPT_FILE" "$JSONL" "$ERRL"
+if ! cron_acquire_lock; then
+  exit 0
+fi
 
 # Savepoints: only launch pi for stages that are missing or failed today
 # (runs/state-<UTC date>.json, driven by scripts/digest_state.py). When
@@ -70,20 +44,5 @@ if [ -z "$REMAINING" ]; then
   exit 0
 fi
 
-# Loud failure marker: a headless run can exit 0 while the model turn
-# aborted (auth errors surface as an empty turn, stopReason=error).
-# Only inspect the lines appended by THIS run (the daily file accumulates).
-# tail streams directly into grep so a huge run cannot trigger a broken pipe.
-WC_BEFORE=$(wc -l < "$JSONL" 2>/dev/null || echo 0)
-/opt/homebrew/bin/pi --provider "$PROVIDER" --model "$MODEL" --thinking "$THINKING" \
-  --mode json --no-session -p "$(cat "$PROMPT_FILE")" \
-  >> "$JSONL" 2>> "$ERRL"
-RC=$?
-if tail -n +$((WC_BEFORE + 1)) "$JSONL" | grep -q 'Not logged in' \
-  || tail -n +$((WC_BEFORE + 1)) "$JSONL" | grep -q '"stopReason":"error"'; then
-  ALERT="MODEL TURN FAILED (auth/error) — check $ERRL and $JSONL"
-  echo "$ALERT" >&2
-  log "$ALERT"
-fi
-log "pi exited rc=$RC"
-exit $RC
+cron_run_model
+exit $?
